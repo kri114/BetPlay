@@ -34,25 +34,29 @@ const lcol = id => {
 };
 
 function parseFixture(f) {
-  const lid = f.league?.id;
-  const color = lcol(lid);
-  const ss = f.fixture?.status?.short;
-  let status = "upcoming";
-  if (["1H","HT","2H","ET","BT","P","LIVE","INT"].includes(ss)) status = "live";
-  else if (["FT","AET","PEN"].includes(ss)) status = "finished";
-  const ko = new Date(f.fixture.date);
-  const timeStr = ko.toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" }) + " · " + ko.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
-  const hp = 40, dp = 25, ap = 35;
+  // football-data.org already parses matches server-side, so f is our own format
+  // Just pass through with defaults for any missing fields
   return {
-    id: f.fixture.id, fixtureId: f.fixture.id,
-    league: f.league?.name || "Unknown", leagueId: lid,
-    leagueColor: color, leagueLogo: f.league?.logo, leagueCountry: f.league?.country,
-    home: f.teams.home.name, away: f.teams.away.name,
-    homeLogo: f.teams.home.logo, awayLogo: f.teams.away.logo,
-    time: timeStr, kickoffTs: ko.getTime(), status, shortStatus: ss,
-    elapsed: f.fixture?.status?.elapsed || null,
-    homeScore: f.score?.fulltime?.home ?? null, awayScore: f.score?.fulltime?.away ?? null,
-    homeOdds: oddsFromPct(hp), drawOdds: oddsFromPct(dp), awayOdds: oddsFromPct(ap),
+    id: f.id,
+    fixtureId: f.fixtureId || f.id,
+    league: f.league || "Unknown",
+    leagueId: f.leagueId,
+    leagueColor: f.leagueColor || lcol(f.leagueId) || "#e8ff47",
+    leagueLogo: f.leagueLogo || null,
+    leagueCountry: f.leagueCountry || "",
+    home: f.home || "TBA",
+    away: f.away || "TBA",
+    homeLogo: f.homeLogo || null,
+    awayLogo: f.awayLogo || null,
+    time: f.time || "",
+    kickoffTs: f.kickoffTs || 0,
+    status: f.status || "upcoming",
+    elapsed: f.elapsed || null,
+    homeScore: f.homeScore ?? null,
+    awayScore: f.awayScore ?? null,
+    homeOdds: f.homeOdds || 2.50,
+    drawOdds: f.drawOdds || 3.20,
+    awayOdds: f.awayOdds || 2.80,
   };
 }
 
