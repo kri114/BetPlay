@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: betplay
+    env: node
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: FOOTBALL_API_KEY
+        value: 7f5c79ac31344744a558c11a582c1bf7
+      - key: JWT_SECRET
+        value: betplay_super_secret_2026
+      - key: NODE_ENV
+        value: production
