@@ -11,7 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "betplay_secret_2026";
 const API_KEY = process.env.FOOTBALL_API_KEY || "PASTE_YOUR_KEY_HERE";
-const API_BASE = "https://api.football-data.org/v4";
+const API_BASE = "https://v3.football.api-sports.io";
 
 const adapter = new FileSync(path.join(__dirname, "db.json"));
 const db = low(adapter);
