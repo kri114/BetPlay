@@ -1,14 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
 const BET_TYPES = [
-  { id:"1x2", label:"Match Result" },
-  { id:"btts", label:"Both Teams Score" },
-  { id:"ou25", label:"Over/Under 2.5" },
-  { id:"ou35", label:"Over/Under 3.5" },
-  { id:"dc",   label:"Double Chance" },
-  { id:"ht",   label:"Half-Time Result" },
-  { id:"cs",   label:"Correct Score" },
-  { id:"ag",   label:"Anytime Scorer" },
+  { id:"1x2",     label:"Match Result" },
+  { id:"btts",    label:"Both Teams Score" },
+  { id:"ou25",    label:"Over/Under 2.5" },
+  { id:"ou35",    label:"Over/Under 3.5" },
+  { id:"ou15",    label:"Over/Under 1.5" },
+  { id:"dc",      label:"Double Chance" },
+  { id:"ht",      label:"Half-Time Result" },
+  { id:"cs",      label:"Correct Score" },
+  { id:"ag",      label:"Both/Anytime Score" },
+  { id:"cards",   label:"Total Cards" },
+  { id:"corners", label:"Total Corners" },
 ];
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -61,15 +64,85 @@ function parseFixture(f) {
 }
 
 function getBetOptions(m, t) {
+  const h = m.homeOdds, d = m.drawOdds, a = m.awayOdds;
+  // derive rough home/away strength from odds
+  const homeFav = h < a;
+  const bigFav  = Math.abs(h - a) > 1.2;
   switch(t) {
-    case "1x2": return [{label:`${m.home}`,odds:m.homeOdds},{label:"Draw",odds:m.drawOdds},{label:`${m.away}`,odds:m.awayOdds}];
-    case "btts": return [{label:"Yes",odds:1.75},{label:"No",odds:2.05}];
-    case "ou25": return [{label:"Over 2.5",odds:1.85},{label:"Under 2.5",odds:1.95}];
-    case "ou35": return [{label:"Over 3.5",odds:2.50},{label:"Under 3.5",odds:1.50}];
-    case "dc":   return [{label:`${m.home}/Draw`,odds:1.30},{label:`${m.away}/Draw`,odds:1.40},{label:`${m.home}/${m.away}`,odds:1.20}];
-    case "ht":   return [{label:`${m.home} HT`,odds:+(m.homeOdds*1.4).toFixed(2)},{label:"HT Draw",odds:2.10},{label:`${m.away} HT`,odds:+(m.awayOdds*1.4).toFixed(2)}];
-    case "cs":   return [{label:"1-0",odds:5.5},{label:"2-0",odds:7.0},{label:"2-1",odds:6.5},{label:"0-1",odds:7.5},{label:"0-2",odds:9.0},{label:"1-1",odds:5.0},{label:"2-2",odds:8.5},{label:"0-0",odds:6.0}];
-    case "ag":   return [{label:`${m.home} scorer`,odds:1.90},{label:`${m.away} scorer`,odds:2.10}];
+    case "1x2":
+      return [
+        { label: m.home,  odds: h },
+        { label: "Draw",  odds: d },
+        { label: m.away,  odds: a },
+      ];
+    case "btts":
+      return [
+        { label: "Both Score – Yes", odds: bigFav ? 1.65 : 1.80 },
+        { label: "Both Score – No",  odds: bigFav ? 2.10 : 1.95 },
+      ];
+    case "ou25":
+      return [
+        { label: "Over 2.5 Goals",  odds: 1.88 },
+        { label: "Under 2.5 Goals", odds: 1.88 },
+      ];
+    case "ou35":
+      return [
+        { label: "Over 3.5 Goals",  odds: 2.75 },
+        { label: "Under 3.5 Goals", odds: 1.45 },
+      ];
+    case "ou15":
+      return [
+        { label: "Over 1.5 Goals",  odds: 1.35 },
+        { label: "Under 1.5 Goals", odds: 3.00 },
+      ];
+    case "dc":
+      return [
+        { label: `${m.home} or Draw`, odds: +(h * 0.55).toFixed(2) },
+        { label: `${m.away} or Draw`, odds: +(a * 0.55).toFixed(2) },
+        { label: `${m.home} or ${m.away}`, odds: +(d * 0.45).toFixed(2) },
+      ];
+    case "ht":
+      return [
+        { label: `${m.home} leads HT`, odds: +(h * 1.35).toFixed(2) },
+        { label: "HT Draw",            odds: 2.05 },
+        { label: `${m.away} leads HT`, odds: +(a * 1.35).toFixed(2) },
+      ];
+    case "cs":
+      return [
+        { label: "1-0", odds: homeFav ? 5.50 : 7.00 },
+        { label: "2-0", odds: homeFav ? 7.00 : 9.50 },
+        { label: "2-1", odds: homeFav ? 6.50 : 8.50 },
+        { label: "1-1", odds: 5.00 },
+        { label: "0-0", odds: 6.50 },
+        { label: "0-1", odds: homeFav ? 7.00 : 5.50 },
+        { label: "0-2", odds: homeFav ? 9.50 : 7.00 },
+        { label: "1-2", odds: homeFav ? 8.50 : 6.50 },
+        { label: "2-2", odds: 9.00 },
+        { label: "3-1", odds: 12.00 },
+        { label: "3-0", odds: 13.00 },
+        { label: "Other", odds: 4.50 },
+      ];
+    case "ag":
+      return [
+        { label: `${m.home} to score`, odds: +(h * 0.70).toFixed(2) },
+        { label: `${m.away} to score`, odds: +(a * 0.70).toFixed(2) },
+        { label: "Both teams to score", odds: 1.80 },
+        { label: "Over 1 goal",        odds: 1.30 },
+      ];
+    case "cards":
+      return [
+        { label: "Over 3.5 cards",  odds: 1.90 },
+        { label: "Under 3.5 cards", odds: 1.85 },
+        { label: "Over 4.5 cards",  odds: 2.80 },
+        { label: "Under 4.5 cards", odds: 1.40 },
+      ];
+    case "corners":
+      return [
+        { label: "Over 9.5 corners",  odds: 1.85 },
+        { label: "Under 9.5 corners", odds: 1.90 },
+        { label: "Over 11.5 corners", odds: 2.60 },
+        { label: "Under 11.5 corners",odds: 1.45 },
+      ];
     default: return [];
   }
 }
@@ -218,7 +291,7 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
                   <button key={bt.id} onClick={()=>{setBetType(bt.id);setSelOpt(null);}} style={{ padding:"5px 12px",borderRadius:20,whiteSpace:"nowrap",border:betType===bt.id?`1px solid ${lc}`:"1px solid rgba(255,255,255,0.1)",background:betType===bt.id?`${lc}22`:"rgba(255,255,255,0.04)",color:betType===bt.id?lc:"rgba(255,255,255,0.45)",cursor:"pointer",fontSize:11,fontWeight:700 }}>{bt.label}</button>
                 ))}
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:opts.length>3?"1fr 1fr 1fr":`repeat(${opts.length},1fr)`, gap:7, marginBottom:14 }}>
+              <div style={{ display:"grid", gridTemplateColumns: betType==="cs" ? "1fr 1fr 1fr 1fr" : opts.length>3?"1fr 1fr 1fr":`repeat(${opts.length},1fr)`, gap:7, marginBottom:14 }}>
                 {opts.map((o,i) => (
                   <button key={i} onClick={()=>setSelOpt(i)} style={{ padding:"10px 4px",borderRadius:10,border:selOpt===i?`2px solid ${lc}`:"2px solid rgba(255,255,255,0.07)",background:selOpt===i?`${lc}18`:"rgba(255,255,255,0.04)",cursor:"pointer",textAlign:"center" }}>
                     <div style={{ fontSize:9,color:"rgba(255,255,255,0.4)",marginBottom:4 }}>{o.label}</div>
@@ -270,10 +343,19 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
                 ))}
               </div>
             </>
-          ) : <Empty icon="📋" title="Lineups not confirmed" sub="Released ~60 min before kick-off"/>)}
+          ) : (
+            <div style={{ textAlign:"center", padding:"36px 20px" }}>
+              <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
+              <div style={{ fontWeight:700, color:"rgba(255,255,255,0.55)", marginBottom:8 }}>Lineups not available</div>
+              <div style={{ fontSize:12, color:"rgba(255,255,255,0.28)", lineHeight:1.7 }}>
+                Our current data plan doesn't include lineups.<br/>
+                Upgrade to a paid API plan to unlock this feature.
+              </div>
+            </div>
+          ))}
 
           {/* STATS */}
-          {tab==="stats" && (tabLoading ? <Loader/> : !(isLive||isFT) ? <Empty icon="⏰" title="Match not started yet" sub={m.time}/> : (
+          {tab==="stats" && (tabLoading ? <Loader/> : !(isLive||isFT) ? <Empty icon="⏰" title="No stats yet" sub={`Match kicks off ${m.time}`}/> : (
             <>
               {(stats?.events||[]).filter(e=>e.type==="Goal").length > 0 && (
                 <div style={{ marginBottom:16 }}>
@@ -729,31 +811,4 @@ export default function App() {
             <div style={{ background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:15,marginBottom:14 }}>
               <div style={{ fontWeight:800,fontSize:13,marginBottom:10 }}>📊 Profit / Loss</div>
               {[{l:"Total wagered",v:fmt(totalWagered),c:"#fff"},{l:"Total won",v:fmt(totalWon),c:"#4ade80"},{l:"Net P/L",v:fmt(totalWon-totalWagered),c:totalWon>=totalWagered?"#4ade80":"#f87171"}].map((s,i) => (
-                <div key={i} style={{ fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:5 }}>{s.l}: <span style={{ color:s.c,fontWeight:700 }}>{s.v}</span></div>
-              ))}
-            </div>
-
-            {favLeagues.size>0 && (
-              <div style={{ background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:15,marginBottom:14 }}>
-                <div style={{ fontWeight:800,fontSize:13,marginBottom:10 }}>⭐ Favourite Leagues</div>
-                {allLeagues.filter(l=>favLeagues.has(l.id)).map(l => (
-                  <div key={l.id} style={{ display:"flex",alignItems:"center",gap:8,marginBottom:8 }}>
-                    {l.logo && <img src={l.logo} alt="" style={{ width:16,height:16,objectFit:"contain" }} onError={e=>e.target.style.display="none"}/>}
-                    <span style={{ fontSize:13,color:l.color,fontWeight:700 }}>{l.name}</span>
-                    <span style={{ fontSize:10,color:"rgba(255,255,255,0.25)" }}>{l.country}</span>
-                    <button onClick={()=>toggleFavLeague(l.id)} style={{ marginLeft:"auto",background:"none",border:"1px solid rgba(248,113,113,0.3)",color:"#f87171",borderRadius:5,padding:"2px 8px",cursor:"pointer",fontSize:10 }}>Remove</button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <button onClick={logout} style={{ width:"100%",padding:13,background:"rgba(248,113,113,0.08)",border:"1px solid rgba(248,113,113,0.2)",color:"#f87171",borderRadius:12,fontWeight:800,cursor:"pointer",fontSize:14 }}>← Log Out</button>
-          </>
-        )}
-      </div>
-
-      {selectedMatch && <MatchModal match={selectedMatch} onClose={()=>setSelectedMatch(null)} onBet={handleBet} balance={user.balance} favMatches={favMatches} onToggleFavMatch={toggleFavMatch}/>}
-      {toast && <div style={{ position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#0e1628",border:`1px solid ${toast.color}44`,color:toast.color,padding:"11px 20px",borderRadius:12,fontWeight:700,fontSize:13,zIndex:300,whiteSpace:"nowrap",boxShadow:"0 8px 32px rgba(0,0,0,0.7)",animation:"toastIn 0.25s ease" }}>{toast.msg}</div>}
-    </div>
-  );
-}
+                <div key={i} style={{ fontSize:13,
