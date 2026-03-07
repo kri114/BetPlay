@@ -10,8 +10,8 @@ const FileSync = require("lowdb/adapters/FileSync");
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "betplay_secret_2026";
-const API_KEY = process.env.FOOTBALL_API_KEY || "PASTE_YOUR_KEY_HERE";
-const API_BASE = "https://v3.football.api-sports.io";
+const API_KEY = process.env.FOOTBALL_API_KEY || "afa24abadf594ebb9791a4e7154caf6f";
+const API_BASE = "https://api.football-data.org/v4";
 
 const adapter = new FileSync(path.join(__dirname, "db.json"));
 const db = low(adapter);
@@ -31,27 +31,72 @@ function auth(req, res, next) {
   catch { res.status(401).json({ error: "Invalid token" }); }
 }
 
-// ─── API CACHE ────────────────────────────────────────────────────────────────
 const cache = new Map();
-async function footballFetch(urlPath, ttl = 30000) {
+async function footballFetch(urlPath, ttl = 60000) {
   const cached = cache.get(urlPath);
   if (cached && Date.now() - cached.ts < ttl) return cached.data;
   const res = await fetch(`${API_BASE}${urlPath}`, {
-    headers: {
-      "x-rapidapi-key": API_KEY,
-      "x-rapidapi-host": "v3.football.api-sports.io",
-    },
+    headers: { "X-Auth-Token": API_KEY },
   });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  const data = await res.json();
-  if (data.errors && Object.keys(data.errors).length > 0) {
-    throw new Error(JSON.stringify(data.errors));
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`API ${res.status}: ${txt.slice(0,120)}`);
   }
+  const data = await res.json();
   cache.set(urlPath, { data, ts: Date.now() });
   return data;
 }
 
-// ─── AUTH ─────────────────────────────────────────────────────────────────────
+const COMPETITIONS = [
+  { code: "PL",  name: "Premier League",    country: "England",    color: "#3b82f6" },
+  { code: "CL",  name: "Champions League",  country: "Europe",     color: "#fbbf24" },
+  { code: "PD",  name: "La Liga",           country: "Spain",      color: "#ef4444" },
+  { code: "BL1", name: "Bundesliga",        country: "Germany",    color: "#f59e0b" },
+  { code: "SA",  name: "Serie A",           country: "Italy",      color: "#10b981" },
+  { code: "FL1", name: "Ligue 1",           country: "France",     color: "#8b5cf6" },
+  { code: "PPL", name: "Primeira Liga",     country: "Portugal",   color: "#22c55e" },
+  { code: "ELC", name: "Championship",      country: "England",    color: "#60a5fa" },
+  { code: "BSA", name: "Brasileirao",       country: "Brazil",     color: "#84cc16" },
+  { code: "CLI", name: "Copa Libertadores", country: "S. America", color: "#f97316" },
+];
+
+function parseMatch(m, comp) {
+  const ss = m.status;
+  let status = "upcoming";
+  if (["IN_PLAY","PAUSED","LIVE"].includes(ss)) status = "live";
+  else if (ss === "FINISHED") status = "finished";
+
+  const ko = new Date(m.utcDate);
+  const timeStr = ko.toLocaleDateString("en-GB", { weekday:"short", day:"numeric", month:"short" }) +
+    " · " + ko.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
+
+  const homeScore = status === "finished"
+    ? (m.score?.fullTime?.home ?? null)
+    : status === "live"
+    ? (m.score?.fullTime?.home ?? m.score?.halfTime?.home ?? null)
+    : null;
+  const awayScore = status === "finished"
+    ? (m.score?.fullTime?.away ?? null)
+    : status === "live"
+    ? (m.score?.fullTime?.away ?? m.score?.halfTime?.away ?? null)
+    : null;
+
+  return {
+    id: m.id, fixtureId: m.id,
+    league: comp.name, leagueId: comp.code,
+    leagueColor: comp.color, leagueCountry: comp.country,
+    leagueLogo: `https://crests.football-data.org/${m.competition?.id}.png`,
+    home: m.homeTeam?.shortName || m.homeTeam?.name || "TBA",
+    away: m.awayTeam?.shortName || m.awayTeam?.name || "TBA",
+    homeLogo: m.homeTeam?.crest || null,
+    awayLogo: m.awayTeam?.crest || null,
+    time: timeStr, kickoffTs: ko.getTime(),
+    status, elapsed: m.minute || null,
+    homeScore, awayScore,
+    homeOdds: 2.50, drawOdds: 3.20, awayOdds: 2.80,
+  };
+}
+
 app.post("/api/auth/signup", (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Missing fields" });
@@ -75,7 +120,6 @@ app.post("/api/auth/login", (req, res) => {
   res.json({ token, user: safe });
 });
 
-// ─── USER ─────────────────────────────────────────────────────────────────────
 app.get("/api/me", auth, (req, res) => {
   const user = getUser(req.user.id);
   if (!user) return res.status(404).json({ error: "Not found" });
@@ -92,13 +136,7 @@ app.post("/api/bet", auth, (req, res) => {
   if (amount < 1) return res.status(400).json({ error: "Minimum bet is $1" });
   const newBalance = Math.round((user.balance - amount) * 100) / 100;
   db.get("users").find({ id: req.user.id }).assign({ balance: newBalance }).write();
-  const bet = {
-    id: nextId("nextBetId"), userId: req.user.id,
-    fixtureId, match_label: matchLabel, league, leagueId,
-    option_label: optionLabel, market, amount, odds, potential,
-    match_time: matchTime, status: "pending",
-    placed_at: new Date().toISOString()
-  };
+  const bet = { id: nextId("nextBetId"), userId: req.user.id, fixtureId, match_label: matchLabel, league, leagueId, option_label: optionLabel, market, amount, odds, potential, match_time: matchTime, status: "pending", placed_at: new Date().toISOString() };
   db.get("bets").push(bet).write();
   res.json({ bet, balance: newBalance });
 });
@@ -118,88 +156,78 @@ app.get("/api/leaderboard", auth, (req, res) => {
   res.json(users);
 });
 
-// ─── FOOTBALL ────────────────────────────────────────────────────────────────
-// Fetch ALL currently active leagues, then get fixtures for each
 app.get("/api/fixtures", auth, async (req, res) => {
   try {
-    // Step 1: get live matches immediately
-    const liveData = await footballFetch("/fixtures?live=all");
-    const liveFixtures = liveData.response || [];
-    const seen = new Set(liveFixtures.map(f => f.fixture.id));
+    const from = new Date(); from.setDate(from.getDate() - 2);
+    const to = new Date(); to.setDate(to.getDate() + 7);
+    const dateFrom = from.toISOString().split("T")[0];
+    const dateTo   = to.toISOString().split("T")[0];
 
-    // Step 2: get all current leagues (cached for 6 hours)
-    const leaguesData = await footballFetch("/leagues?current=true", 6 * 60 * 60 * 1000);
-    const leagues = (leaguesData.response || [])
-      .filter(l => l.league.type === "League" || l.league.type === "Cup")
-      .map(l => ({ id: l.league.id, season: l.seasons?.find(s => s.current)?.year || 2024 }));
+    const all = [];
+    const seen = new Set();
 
-    // Step 3: fetch next+last fixtures for each league in batches
-    const BATCH = 10;
-    const allFixtures = [...liveFixtures];
-
-    for (let i = 0; i < leagues.length; i += BATCH) {
-      const batch = leagues.slice(i, i + BATCH);
-      const results = await Promise.allSettled(
-        batch.flatMap(l => [
-          footballFetch(`/fixtures?league=${l.id}&season=${l.season}&next=10`),
-          footballFetch(`/fixtures?league=${l.id}&season=${l.season}&last=5`),
-        ])
-      );
-      for (const r of results) {
-        if (r.status === "fulfilled") {
-          for (const f of (r.value.response || [])) {
-            if (!seen.has(f.fixture.id)) {
-              allFixtures.push(f);
-              seen.add(f.fixture.id);
-            }
+    for (const comp of COMPETITIONS) {
+      try {
+        const data = await footballFetch(
+          `/competitions/${comp.code}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`
+        );
+        for (const m of (data.matches || [])) {
+          if (!seen.has(m.id)) {
+            all.push(parseMatch(m, comp));
+            seen.add(m.id);
           }
         }
+      } catch(e) {
+        console.warn(`Failed ${comp.code}:`, e.message);
       }
+      await new Promise(r => setTimeout(r, 200));
     }
 
-    // Sort: live first, then upcoming by time, finished last
-    allFixtures.sort((a, b) => {
-      const ss = x => {
-        const s = x.fixture?.status?.short;
-        if (["1H","HT","2H","ET","BT","P","LIVE","INT"].includes(s)) return 0;
-        if (["FT","AET","PEN"].includes(s)) return 2;
-        return 1;
-      };
-      const sa = ss(a), sb = ss(b);
-      if (sa !== sb) return sa - sb;
-      return new Date(a.fixture.date) - new Date(b.fixture.date);
+    all.sort((a, b) => {
+      const o = { live:0, upcoming:1, finished:2 };
+      if (o[a.status] !== o[b.status]) return o[a.status] - o[b.status];
+      return a.kickoffTs - b.kickoffTs;
     });
 
-    res.json({ response: allFixtures, total: allFixtures.length, liveCount: liveFixtures.length });
-  } catch (e) {
+    res.json({ response: all, total: all.length, liveCount: all.filter(m=>m.status==="live").length });
+  } catch(e) {
     res.status(500).json({ error: e.message });
   }
 });
 
 app.get("/api/fixtures/:id/lineups", auth, async (req, res) => {
-  try { res.json(await footballFetch(`/fixtures/lineups?fixture=${req.params.id}`)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  res.json({ response: [] });
 });
 
 app.get("/api/fixtures/:id/stats", auth, async (req, res) => {
   try {
-    const [stats, events] = await Promise.all([
-      footballFetch(`/fixtures/statistics?fixture=${req.params.id}`),
-      footballFetch(`/fixtures/events?fixture=${req.params.id}`),
-    ]);
-    res.json({ stats: stats.response, events: events.response });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const data = await footballFetch(`/matches/${req.params.id}`);
+    const events = (data.goals || []).map(g => ({
+      type: "Goal",
+      player: { name: g.scorer?.name || "Unknown" },
+      team: { name: g.team?.name },
+      time: { elapsed: g.minute },
+    }));
+    res.json({ stats: [], events });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/api/test", async (req, res) => {
   try {
-    const live = await footballFetch("/fixtures?live=all");
-    const leagues = await footballFetch("/leagues?current=true");
-    res.json({ liveCount: live.response?.length, totalLeagues: leagues.response?.length, errors: live.errors });
-  } catch(e) { res.json({ error: e.message }); }
+    const data = await footballFetch("/competitions/PL/matches?status=SCHEDULED");
+    const first = data.matches?.[0];
+    res.json({
+      status: "OK",
+      matchCount: data.matches?.length,
+      nextMatch: first ? `${first.homeTeam?.shortName} vs ${first.awayTeam?.shortName} on ${first.utcDate?.split("T")[0]}` : "none",
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
 });
 
-// STATIC FILES - must be last
 app.use(express.static(path.join(__dirname, "build")));
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "build", "index.html")));
 
