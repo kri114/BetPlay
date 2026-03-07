@@ -10,7 +10,7 @@ const FileSync = require("lowdb/adapters/FileSync");
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "betplay_secret_2026";
-const API_KEY = process.env.FOOTBALL_API_KEY || "7f5c79ac31344744a558c11a582c1bf7";
+const API_KEY = process.env.FOOTBALL_API_KEY || "PASTE_YOUR_KEY_HERE";
 const API_BASE = "https://v3.football.api-sports.io";
 
 const adapter = new FileSync(path.join(__dirname, "db.json"));
@@ -31,19 +31,27 @@ function auth(req, res, next) {
   catch { res.status(401).json({ error: "Invalid token" }); }
 }
 
+// ─── API CACHE ────────────────────────────────────────────────────────────────
 const cache = new Map();
-async function footballFetch(urlPath) {
+async function footballFetch(urlPath, ttl = 30000) {
   const cached = cache.get(urlPath);
-  if (cached && Date.now() - cached.ts < 30000) return cached.data;
+  if (cached && Date.now() - cached.ts < ttl) return cached.data;
   const res = await fetch(`${API_BASE}${urlPath}`, {
-    headers: { "x-rapidapi-key": API_KEY, "x-rapidapi-host": "v3.football.api-sports.io" },
+    headers: {
+      "x-rapidapi-key": API_KEY,
+      "x-rapidapi-host": "v3.football.api-sports.io",
+    },
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
   const data = await res.json();
+  if (data.errors && Object.keys(data.errors).length > 0) {
+    throw new Error(JSON.stringify(data.errors));
+  }
   cache.set(urlPath, { data, ts: Date.now() });
   return data;
 }
 
+// ─── AUTH ─────────────────────────────────────────────────────────────────────
 app.post("/api/auth/signup", (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Missing fields" });
@@ -67,6 +75,7 @@ app.post("/api/auth/login", (req, res) => {
   res.json({ token, user: safe });
 });
 
+// ─── USER ─────────────────────────────────────────────────────────────────────
 app.get("/api/me", auth, (req, res) => {
   const user = getUser(req.user.id);
   if (!user) return res.status(404).json({ error: "Not found" });
@@ -76,14 +85,20 @@ app.get("/api/me", auth, (req, res) => {
 });
 
 app.post("/api/bet", auth, (req, res) => {
-  const { fixtureId, matchLabel, league, optionLabel, market, amount, odds, potential, matchTime } = req.body;
+  const { fixtureId, matchLabel, league, leagueId, optionLabel, market, amount, odds, potential, matchTime } = req.body;
   const user = getUser(req.user.id);
   if (!user) return res.status(404).json({ error: "User not found" });
   if (amount > user.balance) return res.status(400).json({ error: "Insufficient balance" });
   if (amount < 1) return res.status(400).json({ error: "Minimum bet is $1" });
   const newBalance = Math.round((user.balance - amount) * 100) / 100;
   db.get("users").find({ id: req.user.id }).assign({ balance: newBalance }).write();
-  const bet = { id: nextId("nextBetId"), userId: req.user.id, fixtureId, match_label: matchLabel, league, option_label: optionLabel, market, amount, odds, potential, match_time: matchTime, status: "pending", placed_at: new Date().toISOString() };
+  const bet = {
+    id: nextId("nextBetId"), userId: req.user.id,
+    fixtureId, match_label: matchLabel, league, leagueId,
+    option_label: optionLabel, market, amount, odds, potential,
+    match_time: matchTime, status: "pending",
+    placed_at: new Date().toISOString()
+  };
   db.get("bets").push(bet).write();
   res.json({ bet, balance: newBalance });
 });
@@ -103,29 +118,62 @@ app.get("/api/leaderboard", auth, (req, res) => {
   res.json(users);
 });
 
-const LEAGUES = [
-  { id: 39, season: 2024 }, { id: 140, season: 2024 }, { id: 78, season: 2024 },
-  { id: 135, season: 2024 }, { id: 61, season: 2024 }, { id: 2, season: 2024 },
-];
-
-app.get("/api/test", async (req, res) => {
-  try {
-    const data = await footballFetch("/fixtures?league=39&season=2024&next=5");
-    res.json({ count: data.response?.length, errors: data.errors, first: data.response?.[0]?.teams });
-  } catch(e) { res.json({ error: e.message }); }
-});
-
+// ─── FOOTBALL ────────────────────────────────────────────────────────────────
+// Fetch ALL currently active leagues, then get fixtures for each
 app.get("/api/fixtures", auth, async (req, res) => {
   try {
-    const [liveData, ...leagueResults] = await Promise.all([
-      footballFetch("/fixtures?live=all"),
-      ...LEAGUES.map(l => footballFetch(`/fixtures?league=${l.id}&season=${l.season}&next=10`)),
-    ]);
-    const all = [], seen = new Set();
-    for (const f of (liveData.response || [])) { if (!seen.has(f.fixture.id)) { all.push(f); seen.add(f.fixture.id); } }
-    for (const data of leagueResults) { for (const f of (data.response || [])) { if (!seen.has(f.fixture.id)) { all.push(f); seen.add(f.fixture.id); } } }
-    res.json({ response: all });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    // Step 1: get live matches immediately
+    const liveData = await footballFetch("/fixtures?live=all");
+    const liveFixtures = liveData.response || [];
+    const seen = new Set(liveFixtures.map(f => f.fixture.id));
+
+    // Step 2: get all current leagues (cached for 6 hours)
+    const leaguesData = await footballFetch("/leagues?current=true", 6 * 60 * 60 * 1000);
+    const leagues = (leaguesData.response || [])
+      .filter(l => l.league.type === "League" || l.league.type === "Cup")
+      .map(l => ({ id: l.league.id, season: l.seasons?.find(s => s.current)?.year || 2024 }));
+
+    // Step 3: fetch next+last fixtures for each league in batches
+    const BATCH = 10;
+    const allFixtures = [...liveFixtures];
+
+    for (let i = 0; i < leagues.length; i += BATCH) {
+      const batch = leagues.slice(i, i + BATCH);
+      const results = await Promise.allSettled(
+        batch.flatMap(l => [
+          footballFetch(`/fixtures?league=${l.id}&season=${l.season}&next=10`),
+          footballFetch(`/fixtures?league=${l.id}&season=${l.season}&last=5`),
+        ])
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") {
+          for (const f of (r.value.response || [])) {
+            if (!seen.has(f.fixture.id)) {
+              allFixtures.push(f);
+              seen.add(f.fixture.id);
+            }
+          }
+        }
+      }
+    }
+
+    // Sort: live first, then upcoming by time, finished last
+    allFixtures.sort((a, b) => {
+      const ss = x => {
+        const s = x.fixture?.status?.short;
+        if (["1H","HT","2H","ET","BT","P","LIVE","INT"].includes(s)) return 0;
+        if (["FT","AET","PEN"].includes(s)) return 2;
+        return 1;
+      };
+      const sa = ss(a), sb = ss(b);
+      if (sa !== sb) return sa - sb;
+      return new Date(a.fixture.date) - new Date(b.fixture.date);
+    });
+
+    res.json({ response: allFixtures, total: allFixtures.length, liveCount: liveFixtures.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get("/api/fixtures/:id/lineups", auth, async (req, res) => {
@@ -141,6 +189,14 @@ app.get("/api/fixtures/:id/stats", auth, async (req, res) => {
     ]);
     res.json({ stats: stats.response, events: events.response });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get("/api/test", async (req, res) => {
+  try {
+    const live = await footballFetch("/fixtures?live=all");
+    const leagues = await footballFetch("/leagues?current=true");
+    res.json({ liveCount: live.response?.length, totalLeagues: leagues.response?.length, errors: live.errors });
+  } catch(e) { res.json({ error: e.message }); }
 });
 
 // STATIC FILES - must be last
