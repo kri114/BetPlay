@@ -126,8 +126,8 @@ app.get("/api/leaderboard", auth, (req, res) => {
 
 // ─── FOOTBALL PROXY ──────────────────────────────────────────────────────────
 const LEAGUES = [
-  { id: 39, season: 2025 }, { id: 140, season: 2025 }, { id: 78, season: 2025 },
-  { id: 135, season: 2025 }, { id: 61, season: 2025 }, { id: 2, season: 2025 },
+  { id: 39, season: 2026 }, { id: 140, season: 2026 }, { id: 78, season: 2026 },
+  { id: 135, season: 2026 }, { id: 61, season: 2026 }, { id: 2, season: 2026 },
 ];
 
 app.get("/api/fixtures", auth, async (req, res) => {
