@@ -26,6 +26,14 @@ function nextId(key)       { const id = db.get(key).value(); db.set(key, id + 1)
 // ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
+app.get("/api/test", async (req, res) => {
+  try {
+    const data = await footballFetch("/fixtures?league=39&season=2025&next=5");
+    res.json({ count: data.response?.length, first: data.response?.[0]?.teams });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
 app.use(express.static(path.join(__dirname, "../client/build")));
 
 function auth(req, res, next) {
