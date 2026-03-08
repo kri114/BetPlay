@@ -452,11 +452,11 @@ export default function App() {
     });
   }, []);
 
-  var fetchMatches = useCallback(function() {
-    setLoading(true); setFetchError(null);
+  var fetchMatches = useCallback(function(silent) {
+    if (!silent) { setLoading(true); setFetchError(null); }
     api("/fixtures")
       .then(function(data){ setMatches((data.response||[]).map(parseFixture)); })
-      .catch(function(e){ setFetchError(e.message); })
+      .catch(function(e){ if (!silent) setFetchError(e.message); })
       .finally(function(){ setLoading(false); });
   }, []);
 
@@ -468,7 +468,7 @@ export default function App() {
     if (!user) return;
     fetchMatches();
     api("/leaderboard").then(function(d){ setLeaderboard(d); }).catch(function(){});
-    refreshRef.current = setInterval(function(){ fetchMatches(); refreshUser(); }, 30000);
+    refreshRef.current = setInterval(function(){ fetchMatches(true); refreshUser(); }, 30000);
     return function(){ clearInterval(refreshRef.current); };
   }, [user]);
 
