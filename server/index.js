@@ -16,20 +16,18 @@ const MONGO_URI  = process.env.MONGODB_URI || "mongodb+srv://BetPlay:eekk1104@be
 app.use(cors());
 app.use(express.json());
 
-// ── MongoDB connection ────────────────────────────────────────────────────────
+// ── MongoDB ───────────────────────────────────────────────────────────────────
 let db;
 async function connectDB() {
   const client = new MongoClient(MONGO_URI);
   await client.connect();
   db = client.db("BetPlay");
   console.log("Connected to MongoDB");
-  // Indexes
   await db.collection("users").createIndex({ username: 1 }, { unique: true });
   await db.collection("bets").createIndex({ userId: 1 });
   await db.collection("bets").createIndex({ fixtureId: 1, status: 1 });
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function auth(req, res, next) {
   const token = (req.headers.authorization || "").split(" ")[1];
   if (!token) return res.status(401).json({ error: "No token" });
@@ -70,6 +68,44 @@ const COMPETITIONS = [
   { code:"CLI", name:"Copa Libertadores", country:"S. America", color:"#f97316" },
 ];
 
+// Generate realistic odds based on team league position
+// football-data.org includes position in some responses but not fixtures list
+// We use team ID to seed a deterministic "strength" so odds are consistent
+function generateOdds(homeId, awayId, elapsed, homeScore, awayScore) {
+  // Seed strength from team ID (0.0 - 1.0)
+  const hStr = ((homeId * 7 + 13) % 100) / 100;
+  const aStr = ((awayId * 11 + 7) % 100) / 100;
+
+  // Home advantage bonus
+  const hAdj = hStr * 0.6 + 0.2; // 0.2 - 0.8
+  const aAdj = aStr * 0.6 + 0.1; // 0.1 - 0.7
+
+  // Base odds (higher strength = lower odds = more favoured)
+  let hOdds = Math.max(1.20, +(4.5 - hAdj * 3.5).toFixed(2));
+  let aOdds = Math.max(1.30, +(5.0 - aAdj * 3.5).toFixed(2));
+  let dOdds = +(2.5 + Math.abs(hAdj - aAdj) * 0.8).toFixed(2);
+
+  // If live: adjust odds based on current score
+  if (elapsed != null && homeScore != null && awayScore != null) {
+    const diff = homeScore - awayScore;
+    const timeLeft = Math.max(1, 90 - elapsed);
+    const urgency = 90 / (timeLeft + 10); // increases as game nears end
+
+    if (diff > 0) {
+      // Home winning - home odds shorten, away lengthen
+      hOdds = Math.max(1.05, +(hOdds - diff * 0.4 * urgency).toFixed(2));
+      aOdds = Math.min(15.0, +(aOdds + diff * 0.6 * urgency).toFixed(2));
+      dOdds = Math.min(10.0, +(dOdds + diff * 0.3 * urgency).toFixed(2));
+    } else if (diff < 0) {
+      aOdds = Math.max(1.05, +(aOdds + diff * 0.4 * urgency).toFixed(2));
+      hOdds = Math.min(15.0, +(hOdds - diff * 0.6 * urgency).toFixed(2));
+      dOdds = Math.min(10.0, +(dOdds - diff * 0.3 * urgency).toFixed(2));
+    }
+  }
+
+  return { homeOdds: hOdds, drawOdds: dOdds, awayOdds: aOdds };
+}
+
 function parseMatch(m, comp) {
   const ss = m.status;
   let status = "upcoming";
@@ -87,6 +123,11 @@ function parseMatch(m, comp) {
   const awayScore = status==="finished" ? (ft && ft.away != null ? ft.away : null)
     : status==="live" ? (ft && ft.away != null ? ft.away : (ht && ht.away != null ? ht.away : null)) : null;
 
+  const homeId = (m.homeTeam && m.homeTeam.id) || 1;
+  const awayId = (m.awayTeam && m.awayTeam.id) || 2;
+  const elapsed = m.minute || null;
+  const odds = generateOdds(homeId, awayId, status === "live" ? elapsed : null, homeScore, awayScore);
+
   return {
     id: m.id, fixtureId: m.id,
     league: comp.name, leagueId: comp.code,
@@ -94,12 +135,13 @@ function parseMatch(m, comp) {
     leagueLogo: "https://crests.football-data.org/" + (m.competition && m.competition.id) + ".png",
     home: (m.homeTeam && (m.homeTeam.shortName || m.homeTeam.name)) || "TBA",
     away: (m.awayTeam && (m.awayTeam.shortName || m.awayTeam.name)) || "TBA",
+    homeTeamId: homeId, awayTeamId: awayId,
     homeLogo: (m.homeTeam && m.homeTeam.crest) || null,
     awayLogo: (m.awayTeam && m.awayTeam.crest) || null,
     time: timeStr, kickoffTs: ko.getTime(),
-    status, elapsed: m.minute || null,
+    status, elapsed,
     homeScore, awayScore,
-    homeOdds: 2.50, drawOdds: 3.20, awayOdds: 2.80,
+    homeOdds: odds.homeOdds, drawOdds: odds.drawOdds, awayOdds: odds.awayOdds,
     winner: (m.score && m.score.winner) || null,
   };
 }
@@ -131,8 +173,7 @@ async function settleBets() {
     const betsHere = pending.filter(b => String(b.fixtureId) === String(fid));
     for (const bet of betsHere) {
       const opt = (bet.option_label || "").toLowerCase();
-      let won = false;
-      let refund = false;
+      let won = false, refund = false;
 
       switch(bet.market) {
         case "Match Result":
@@ -180,13 +221,11 @@ async function settleBets() {
       if (refund) {
         await db.collection("bets").updateOne({ _id: bet._id }, { $set: { status: "refunded", settled_at: now } });
         await db.collection("users").updateOne({ _id: bet.userId }, { $inc: { balance: bet.amount } });
-        console.log("Refunded", bet.amount, "- no data for", bet.market);
       } else {
-        const newStatus = won ? "won" : "lost";
-        await db.collection("bets").updateOne({ _id: bet._id }, { $set: { status: newStatus, settled_at: now } });
+        await db.collection("bets").updateOne({ _id: bet._id }, { $set: { status: won ? "won" : "lost", settled_at: now } });
         if (won) {
           await db.collection("users").updateOne({ _id: bet.userId }, { $inc: { balance: bet.potential } });
-          console.log("PAYOUT", bet.potential, "for", bet.market, bet.option_label);
+          console.log("PAYOUT", bet.potential, "->", bet.option_label);
         }
       }
     }
@@ -210,7 +249,7 @@ app.post("/api/auth/signup", async (req, res) => {
     const result = await db.collection("users").insertOne(user);
     const id = result.insertedId.toString();
     const token = jwt.sign({ id, username }, JWT_SECRET, { expiresIn: "90d" });
-    res.json({ token, user: { id, username, balance: user.balance, joined: user.joined } });
+    res.json({ token, user: { id, username, balance: 100, joined: user.joined } });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -243,21 +282,16 @@ app.post("/api/bet", auth, async (req, res) => {
     if (!user) return res.status(404).json({ error: "User not found" });
     if (amount > user.balance) return res.status(400).json({ error: "Insufficient balance" });
     if (amount < 1) return res.status(400).json({ error: "Min bet $1" });
-
     const newBalance = Math.round((user.balance - amount) * 100) / 100;
     await db.collection("users").updateOne({ _id: user._id }, { $set: { balance: newBalance } });
-
     const bet = {
-      userId: user._id,
-      fixtureId, match_label: matchLabel, league, leagueId,
+      userId: user._id, fixtureId, match_label: matchLabel, league, leagueId,
       option_label: optionLabel, market, amount, odds,
       potential: Math.round(potential * 100) / 100,
-      match_time: matchTime, status: "pending",
-      placed_at: new Date().toISOString()
+      match_time: matchTime, status: "pending", placed_at: new Date().toISOString()
     };
     const result = await db.collection("bets").insertOne(bet);
     const safeBet = { ...bet, id: result.insertedId.toString(), userId: req.user.id };
-
     setTimeout(settleBets, 3000);
     res.json({ bet: safeBet, balance: newBalance });
   } catch(e) { res.status(500).json({ error: e.message }); }
@@ -292,7 +326,6 @@ app.get("/api/fixtures", auth, async (req, res) => {
     const to   = new Date(); to.setDate(to.getDate() + 7);
     const df = from.toISOString().split("T")[0];
     const dt = to.toISOString().split("T")[0];
-
     const all = [], seen = new Set();
     for (const comp of COMPETITIONS) {
       try {
@@ -303,7 +336,6 @@ app.get("/api/fixtures", auth, async (req, res) => {
       } catch(e) { console.warn("Fetch failed", comp.code, e.message); }
       await delay(110);
     }
-
     all.sort((a, b) => {
       const ord = { live:0, upcoming:1, finished:2 };
       if (ord[a.status] !== ord[b.status]) return ord[a.status] - ord[b.status];
@@ -313,66 +345,21 @@ app.get("/api/fixtures", auth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Match detail (stats + lineups) ────────────────────────────────────────────
+// ── Match detail ──────────────────────────────────────────────────────────────
 app.get("/api/fixtures/:id/stats", auth, async (req, res) => {
   try {
     const raw = await footballFetch("/matches/" + req.params.id, 15000);
     const m   = (raw.id ? raw : raw.match) || raw;
-
-    const ft = m.score && m.score.fullTime;
-    const ht = m.score && m.score.halfTime;
-
+    const ft  = m.score && m.score.fullTime;
+    const ht  = m.score && m.score.halfTime;
     const events = (m.goals || []).map(g => ({
-      type:   "Goal",
+      type: "Goal",
       player: { name: (g.scorer && g.scorer.name) || "Unknown" },
       team:   { name: (g.team   && g.team.name)   || "" },
       time:   { elapsed: g.minute },
     }));
-
-    const homeLineup  = (m.homeTeam && m.homeTeam.lineup)  || [];
-    const awayLineup  = (m.awayTeam && m.awayTeam.lineup)  || [];
-    const homeBench   = (m.homeTeam && m.homeTeam.bench)   || [];
-    const awayBench   = (m.awayTeam && m.awayTeam.bench)   || [];
-    const homeFormation = (m.homeTeam && m.homeTeam.formation) || null;
-    const awayFormation = (m.awayTeam && m.awayTeam.formation) || null;
-
-    res.json({
-      events, fullTime: ft || null, halfTime: ht || null,
-      status:  m.status,
-      winner:  (m.score && m.score.winner) || null,
-      homeTeam: (m.homeTeam && m.homeTeam.name) || "",
-      awayTeam: (m.awayTeam && m.awayTeam.name) || "",
-      referees: (m.referees || []).map(r => r.name).join(", "),
-      venue:    m.venue || "",
-      attendance: m.attendance || null,
-      lineups: {
-        home: { formation: homeFormation, lineup: homeLineup, bench: homeBench },
-        away: { formation: awayFormation, lineup: awayLineup, bench: awayBench },
-      },
-    });
-  } catch(e) { res.status(500).json({ error: e.message }); }
-});
-
-app.post("/api/settle", auth, async (req, res) => {
-  await settleBets();
-  res.json({ ok: true });
-});
-
-app.get("/api/test", async (req, res) => {
-  try {
-    const data = await footballFetch("/competitions/PL/matches?status=SCHEDULED", 0);
-    res.json({ ok: true, scheduled: data.matches && data.matches.length, db: !!db });
-  } catch(e) { res.json({ error: e.message }); }
-});
-
-// ── Static ────────────────────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, "build")));
-app.get("*", (req, res) => res.sendFile(path.join(__dirname, "build", "index.html")));
-
-// ── Start ─────────────────────────────────────────────────────────────────────
-connectDB().then(() => {
-  app.listen(PORT, () => console.log("BetPlay on port " + PORT));
-}).catch(e => {
-  console.error("Failed to connect to MongoDB:", e.message);
-  process.exit(1);
-});
+    const homeLineup    = (m.homeTeam && m.homeTeam.lineup)    || [];
+    const awayLineup    = (m.awayTeam && m.awayTeam.lineup)    || [];
+    const homeBench     = (m.homeTeam && m.homeTeam.bench)     || [];
+    const awayBench     = (m.awayTeam && m.awayTeam.bench)     || [];
+    const homeFormatio
