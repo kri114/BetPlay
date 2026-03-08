@@ -362,4 +362,38 @@ app.get("/api/fixtures/:id/stats", auth, async (req, res) => {
     const awayLineup    = (m.awayTeam && m.awayTeam.lineup)    || [];
     const homeBench     = (m.homeTeam && m.homeTeam.bench)     || [];
     const awayBench     = (m.awayTeam && m.awayTeam.bench)     || [];
-    const homeFormatio
+    const homeFormation = (m.homeTeam && m.homeTeam.formation) || null;
+    const awayFormation = (m.awayTeam && m.awayTeam.formation) || null;
+    res.json({
+      events, fullTime: ft || null, halfTime: ht || null,
+      status: m.status, elapsed: m.minute || null,
+      winner: (m.score && m.score.winner) || null,
+      homeTeam: (m.homeTeam && m.homeTeam.name) || "",
+      awayTeam: (m.awayTeam && m.awayTeam.name) || "",
+      referees: (m.referees || []).map(r => r.name).join(", "),
+      venue: m.venue || "", attendance: m.attendance || null,
+      lineups: {
+        home: { formation: homeFormation, lineup: homeLineup, bench: homeBench },
+        away: { formation: awayFormation, lineup: awayLineup, bench: awayBench },
+      },
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/api/settle", auth, async (req, res) => {
+  await settleBets(); res.json({ ok: true });
+});
+
+app.get("/api/test", async (req, res) => {
+  try {
+    const data = await footballFetch("/competitions/PL/matches?status=SCHEDULED", 0);
+    res.json({ ok: true, scheduled: data.matches && data.matches.length, db: !!db });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
+app.use(express.static(path.join(__dirname, "build")));
+app.get("*", (req, res) => res.sendFile(path.join(__dirname, "build", "index.html")));
+
+connectDB().then(() => {
+  app.listen(PORT, () => console.log("BetPlay on port " + PORT));
+}).catch(e => { console.error("Failed to connect to MongoDB:", e.message); process.exit(1); });
