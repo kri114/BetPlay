@@ -764,4 +764,26 @@ export default function App() {
                 {allLeagues.filter(function(l){ return favLeagues.has(l.id); }).map(function(l) {
                   return <div key={l.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
                     {l.logo && <img src={l.logo} alt="" style={{ width:16, height:16, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
-                    <span style={{ fontSize:13, color:l.color, 
+                    <span style={{ fontSize:13, color:l.color, fontWeight:700, flex:1 }}>{l.name}</span>
+                    <button onClick={function(){ toggleFavLeague(l.id); }} style={{ background:"none", border:"1px solid rgba(248,113,113,0.3)", color:"#f87171", borderRadius:5, padding:"2px 8px", cursor:"pointer", fontSize:10 }}>Remove</button>
+                  </div>;
+                })}
+              </div>
+            )}
+
+            <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:15, marginBottom:14 }}>
+              <div style={{ fontWeight:800, fontSize:13, marginBottom:6 }}>P / L Summary</div>
+              {[{l:"Wagered",v:fmt(totalWagered),c:"#fff"},{l:"Won",v:fmt(totalWon),c:"#4ade80"},{l:"Net P/L",v:fmt(totalWon-totalWagered),c:totalWon>=totalWagered?"#4ade80":"#f87171"}].map(function(s,i){
+                return <div key={i} style={{ fontSize:13, color:"rgba(255,255,255,0.45)", marginBottom:5 }}>{s.l}: <span style={{ color:s.c, fontWeight:700 }}>{s.v}</span></div>;
+              })}
+            </div>
+            <button onClick={logout} style={{ width:"100%", padding:13, background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.2)", color:"#f87171", borderRadius:12, fontWeight:800, cursor:"pointer", fontSize:14 }}>Log Out</button>
+          </div>
+        )}
+      </div>
+
+      {selectedMatch && <MatchModal match={selectedMatch} onClose={function(){ setSelectedMatch(null); }} onBet={handleBet} balance={user.balance} favMatches={favMatches} onToggleFavMatch={toggleFavMatch} />}
+      {toast && <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#0e1628", border:"1px solid "+toast.color+"44", color:toast.color, padding:"11px 20px", borderRadius:12, fontWeight:700, fontSize:13, zIndex:300, whiteSpace:"nowrap", boxShadow:"0 8px 32px rgba(0,0,0,0.7)", animation:"toastIn 0.25s ease" }}>{toast.msg}</div>}
+    </div>
+  );
+}
