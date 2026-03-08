@@ -11,7 +11,7 @@ const PORT       = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "betplay_secret_2026";
 const API_KEY    = process.env.FOOTBALL_API_KEY || "afa24abadf594ebb9791a4e7154caf6f";
 const API_BASE   = "https://api.football-data.org/v4";
-const MONGO_URI  = process.env.MONGODB_URI || "mongodb+srv://BetPlay:eekk1104@betplay.sig2icr.mongodb.net/betplay?appName=BetPlay";
+const MONGO_URI  = process.env.MONGODB_URI || "mongodb+srv://BetPlay:eekk1104@betplay.sig2icr.mongodb.net/BetPlay?appName=BetPlay";
 
 app.use(cors());
 app.use(express.json());
@@ -21,7 +21,7 @@ let db;
 async function connectDB() {
   const client = new MongoClient(MONGO_URI);
   await client.connect();
-  db = client.db("betplay");
+  db = client.db("BetPlay");
   console.log("Connected to MongoDB");
   // Indexes
   await db.collection("users").createIndex({ username: 1 }, { unique: true });
