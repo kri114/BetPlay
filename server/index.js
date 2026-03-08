@@ -56,16 +56,12 @@ async function footballFetch(urlPath, ttlMs) {
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
 const COMPETITIONS = [
-  { code:"PL",  name:"Premier League",    country:"England",    color:"#3b82f6" },
-  { code:"CL",  name:"Champions League",  country:"Europe",     color:"#fbbf24" },
-  { code:"PD",  name:"La Liga",           country:"Spain",      color:"#ef4444" },
-  { code:"BL1", name:"Bundesliga",        country:"Germany",    color:"#f59e0b" },
-  { code:"SA",  name:"Serie A",           country:"Italy",      color:"#10b981" },
-  { code:"FL1", name:"Ligue 1",           country:"France",     color:"#8b5cf6" },
-  { code:"PPL", name:"Primeira Liga",     country:"Portugal",   color:"#22c55e" },
-  { code:"ELC", name:"Championship",      country:"England",    color:"#60a5fa" },
-  { code:"BSA", name:"Brasileirao",       country:"Brazil",     color:"#84cc16" },
-  { code:"CLI", name:"Copa Libertadores", country:"S. America", color:"#f97316" },
+  { code:"PL",  name:"Premier League",   country:"England", color:"#3b82f6" },
+  { code:"CL",  name:"Champions League", country:"Europe",  color:"#fbbf24" },
+  { code:"PD",  name:"La Liga",          country:"Spain",   color:"#ef4444" },
+  { code:"BL1", name:"Bundesliga",       country:"Germany", color:"#f59e0b" },
+  { code:"SA",  name:"Serie A",          country:"Italy",   color:"#10b981" },
+  { code:"FL1", name:"Ligue 1",          country:"France",  color:"#8b5cf6" },
 ];
 
 // Generate realistic odds based on team league position
@@ -319,8 +315,16 @@ app.get("/api/leaderboard", auth, async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── Fixtures ──────────────────────────────────────────────────────────────────
-app.get("/api/fixtures", auth, async (req, res) => {
+// -- Fixtures --
+// Cache: non-live = 5 minutes, live = 30 seconds
+// Only 6 leagues = 6 API calls max, well within 10 req/min free tier
+let _fixturesCache = null;
+let _fixturesCacheTs = 0;
+let _fixturesRefreshing = false;
+
+async function buildFixtures() {
+  if (_fixturesRefreshing) return;
+  _fixturesRefreshing = true;
   try {
     const from = new Date(); from.setDate(from.getDate() - 2);
     const to   = new Date(); to.setDate(to.getDate() + 7);
@@ -329,20 +333,42 @@ app.get("/api/fixtures", auth, async (req, res) => {
     const all = [], seen = new Set();
     for (const comp of COMPETITIONS) {
       try {
-        const data = await footballFetch("/competitions/" + comp.code + "/matches?dateFrom=" + df + "&dateTo=" + dt, 20000);
-        for (const m of (data.matches || [])) {
-          if (!seen.has(m.id)) { all.push(parseMatch(m, comp)); seen.add(m.id); }
+        const res2 = await fetch(API_BASE + "/competitions/" + comp.code + "/matches?dateFrom=" + df + "&dateTo=" + dt, { headers: { "X-Auth-Token": API_KEY } });
+        if (res2.status === 429) { console.warn("Rate limited on", comp.code); }
+        else if (res2.ok) {
+          const data = await res2.json();
+          for (const m of (data.matches || [])) {
+            if (!seen.has(m.id)) { all.push(parseMatch(m, comp)); seen.add(m.id); }
+          }
         }
       } catch(e) { console.warn("Fetch failed", comp.code, e.message); }
-      await delay(110);
+      await delay(6200); // 6s between requests = safe under 10 req/min
     }
     all.sort((a, b) => {
       const ord = { live:0, upcoming:1, finished:2 };
       if (ord[a.status] !== ord[b.status]) return ord[a.status] - ord[b.status];
       return a.kickoffTs - b.kickoffTs;
     });
-    res.json({ response: all, total: all.length });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    if (all.length > 0) { _fixturesCache = all; _fixturesCacheTs = Date.now(); }
+    console.log("Fixtures built:", (_fixturesCache||[]).length, "matches");
+  } catch(e) { console.error("buildFixtures error:", e.message); }
+  finally { _fixturesRefreshing = false; }
+}
+
+// On boot, build immediately. Then check every 30s:
+// - if any live match exists: rebuild every 30s
+// - if no live matches: rebuild every 5 minutes
+setTimeout(buildFixtures, 500);
+setInterval(async function() {
+  const hasLive = (_fixturesCache||[]).some(m => m.status === "live");
+  const age = Date.now() - _fixturesCacheTs;
+  const ttl = hasLive ? 30000 : 5 * 60 * 1000;
+  if (age > ttl) buildFixtures();
+}, 30000);
+
+app.get("/api/fixtures", auth, (req, res) => {
+  if (!_fixturesCache) return res.json({ response: [], total: 0, loading: true });
+  res.json({ response: _fixturesCache, total: _fixturesCache.length });
 });
 
 // ── Match detail ──────────────────────────────────────────────────────────────
