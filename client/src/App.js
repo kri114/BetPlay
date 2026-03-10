@@ -15,8 +15,15 @@ async function api(path, opts) {
 
 const fmt = function(n) { return "$" + Number(n).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); };
 const lcol = function(id) {
-  var MAP = { "PL":"#3b82f6","CL":"#fbbf24","PD":"#ef4444","BL1":"#f59e0b","SA":"#10b981","FL1":"#8b5cf6" };
-  return MAP[id] || "#e8ff47";
+  var MAP = {
+    "39":"#3b82f6","PL":"#3b82f6",
+    "2":"#fbbf24","CL":"#fbbf24",
+    "140":"#ef4444","PD":"#ef4444",
+    "78":"#f59e0b","BL1":"#f59e0b",
+    "135":"#10b981","SA":"#10b981",
+    "61":"#8b5cf6","FL1":"#8b5cf6",
+  };
+  return MAP[String(id)] || "#e8ff47";
 };
 
 function parseFixture(f) {
