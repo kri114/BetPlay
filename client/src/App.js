@@ -112,91 +112,94 @@ function PlayerRow({ p }) {
   </div>;
 }
 
-// -- Multi-bet slip (global, outside modal) ------------------------------------
+// -- Acca Bet Slip --
 function BetSlip({ slip, onRemove, onClear, onPlaceAll, balance }) {
-  var [stakes, setStakes] = useState({});
+  var [stake, setStake] = useState("");
   var [placing, setPlacing] = useState(false);
 
-  var totalStake = slip.reduce(function(s, b) { return s + (parseFloat(stakes[b.key])||0); }, 0);
-  var totalPotential = slip.reduce(function(s, b) {
-    var amt = parseFloat(stakes[b.key])||0;
-    return s + Math.round(amt * b.odds * 100)/100;
-  }, 0);
+  var combinedOdds = slip.reduce(function(acc, b) { return Math.round(acc * b.odds * 100) / 100; }, 1);
+  var stakeAmt = parseFloat(stake) || 0;
+  var potential = stakeAmt > 0 ? Math.round(stakeAmt * combinedOdds * 100) / 100 : 0;
 
-  var setStake = function(key, val) {
-    setStakes(function(prev) { return Object.assign({}, prev, { [key]: val }); });
-  };
-
-  var setQuick = function(key, amt) {
-    setStake(key, String(Math.min(amt, balance)));
-  };
-
-  var placeAll = function() {
-    var valid = slip.filter(function(b) { return parseFloat(stakes[b.key])>=1; });
-    if (!valid.length) return;
+  var placeAcca = function() {
+    if (stakeAmt < 1 || stakeAmt > balance) return;
     setPlacing(true);
-    onPlaceAll(valid.map(function(b) {
-      return Object.assign({}, b, { amount: parseFloat(stakes[b.key]), potential: Math.round(parseFloat(stakes[b.key])*b.odds*100)/100 });
-    })).finally(function(){ setPlacing(false); });
+    // For acca: place as a single bet with all selections combined
+    onPlaceAll([{
+      key: slip.map(function(b){ return b.key; }).join("+"),
+      fixtureId: slip[0].fixtureId,
+      matchLabel: slip.length === 1 ? slip[0].matchLabel : slip.length + "-fold Accumulator",
+      league: slip[0].league, leagueId: slip[0].leagueId,
+      optLabel: slip.map(function(b){ return b.optLabel + " (" + b.matchLabel + ")"; }).join(" | "),
+      marketLabel: slip.length === 1 ? slip[0].marketLabel : "Accumulator",
+      odds: combinedOdds,
+      amount: stakeAmt,
+      potential: potential,
+      matchTime: slip[0].matchTime,
+      isAcca: slip.length > 1,
+      legs: slip,
+    }]).finally(function(){ setPlacing(false); });
   };
 
   if (!slip.length) return null;
 
   return (
     <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, zIndex:150, background:"#0b1526", borderTop:"2px solid #e8ff47", boxShadow:"0 -8px 40px rgba(0,0,0,0.8)" }}>
-      <div style={{ padding:"10px 14px 4px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <span style={{ fontWeight:900, fontSize:13, color:"#e8ff47" }}>BET SLIP ({slip.length})</span>
+      <div style={{ padding:"10px 14px 6px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <div>
+          <span style={{ fontWeight:900, fontSize:13, color:"#e8ff47" }}>
+            {slip.length === 1 ? "BET SLIP" : slip.length + "-FOLD ACCA"}
+          </span>
+          {slip.length > 1 && (
+            <span style={{ marginLeft:8, fontSize:12, color:"rgba(255,255,255,0.4)" }}>
+              Combined odds: <span style={{ color:"#e8ff47", fontWeight:800 }}>{combinedOdds}x</span>
+            </span>
+          )}
+        </div>
         <button onClick={onClear} style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:11 }}>Clear all</button>
       </div>
-      <div style={{ maxHeight:320, overflowY:"auto", padding:"0 14px" }}>
+
+      <div style={{ maxHeight:160, overflowY:"auto", padding:"0 14px 6px" }}>
         {slip.map(function(b) {
           var lc = lcol(b.leagueId);
-          var amt = stakes[b.key] || "";
-          var pot = amt && parseFloat(amt)>0 ? Math.round(parseFloat(amt)*b.odds*100)/100 : 0;
           return (
-            <div key={b.key} style={{ background:"rgba(255,255,255,0.04)", borderLeft:"3px solid "+lc, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ fontSize:10, color:lc, fontWeight:700 }}>{b.matchLabel}</div>
-                  <div style={{ fontWeight:800, fontSize:13, marginTop:1 }}>{b.optLabel}</div>
-                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)" }}>{b.marketLabel}</div>
-                </div>
-                <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0, marginLeft:8 }}>
-                  <span style={{ fontSize:18, fontWeight:900, color:lc }}>{b.odds}x</span>
-                  <button onClick={function(){ onRemove(b.key); }} style={{ background:"rgba(248,113,113,0.15)", border:"none", color:"#f87171", borderRadius:5, width:22, height:22, cursor:"pointer", fontSize:14, lineHeight:1 }}>x</button>
-                </div>
+            <div key={b.key} style={{ display:"flex", alignItems:"center", gap:8, padding:"6px 10px", marginBottom:5, background:"rgba(255,255,255,0.04)", borderLeft:"2px solid "+lc, borderRadius:8 }}>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:9, color:"rgba(255,255,255,0.35)", overflow:"hidden", whiteSpace:"nowrap", textOverflow:"ellipsis" }}>{b.matchLabel} - {b.marketLabel}</div>
+                <div style={{ fontWeight:800, fontSize:12, color:"#fff" }}>{b.optLabel}</div>
               </div>
-              <div style={{ display:"flex", gap:4, marginBottom:5 }}>
-                {[5,10,25,50].map(function(q) {
-                  return <button key={q} onClick={function(){ setQuick(b.key, q); }} style={{ flex:1, padding:"4px 0", borderRadius:6, border:amt===String(Math.min(q,balance))?"1px solid "+lc:"1px solid rgba(255,255,255,0.08)", background:amt===String(Math.min(q,balance))?lc+"18":"rgba(255,255,255,0.04)", color:amt===String(Math.min(q,balance))?lc:"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:11, fontWeight:700 }}>${q}</button>;
-                })}
-              </div>
-              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                <div style={{ flex:1, position:"relative" }}>
-                  <span style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.4)", fontSize:13 }}>$</span>
-                  <input value={amt} onChange={function(e){ setStake(b.key, e.target.value); }} type="number" placeholder="Stake" style={{ width:"100%", padding:"8px 8px 8px 22px", borderRadius:7, background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.1)", color:"#fff", fontSize:13, outline:"none", fontWeight:700, boxSizing:"border-box" }} />
-                </div>
-                <div style={{ textAlign:"right", minWidth:64 }}>
-                  <div style={{ fontSize:9, color:"rgba(255,255,255,0.35)" }}>WIN</div>
-                  <div style={{ fontSize:14, fontWeight:900, color:pot>0?"#4ade80":"rgba(255,255,255,0.2)" }}>{pot>0?fmt(pot):"--"}</div>
-                </div>
-              </div>
+              <span style={{ fontSize:14, fontWeight:900, color:lc, flexShrink:0 }}>{b.odds}x</span>
+              <button onClick={function(){ onRemove(b.key); }} style={{ background:"rgba(248,113,113,0.15)", border:"none", color:"#f87171", borderRadius:5, width:20, height:20, cursor:"pointer", fontSize:12, lineHeight:1, flexShrink:0 }}>x</button>
             </div>
           );
         })}
       </div>
-      <div style={{ padding:"8px 14px 20px", borderTop:"1px solid rgba(255,255,255,0.08)", marginTop:4 }}>
-        <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:8 }}>
-          <span style={{ color:"rgba(255,255,255,0.4)" }}>Total stake: <span style={{ color:"#fff", fontWeight:700 }}>{fmt(totalStake)}</span></span>
-          <span style={{ color:"rgba(255,255,255,0.4)" }}>Total win: <span style={{ color:"#4ade80", fontWeight:700 }}>{fmt(totalPotential)}</span></span>
+
+      <div style={{ padding:"8px 14px 20px", borderTop:"1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ display:"flex", gap:4, marginBottom:7 }}>
+          {[5,10,25,50].map(function(q) {
+            return <button key={q} onClick={function(){ setStake(String(Math.min(q, balance))); }} style={{ flex:1, padding:"5px 0", borderRadius:7, border:stake===String(Math.min(q,balance))?"1px solid #e8ff47":"1px solid rgba(255,255,255,0.1)", background:stake===String(Math.min(q,balance))?"rgba(232,255,71,0.1)":"rgba(255,255,255,0.04)", color:stake===String(Math.min(q,balance))?"#e8ff47":"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:12, fontWeight:700 }}>${q}</button>;
+          })}
+          <button onClick={function(){ setStake(String(balance)); }} style={{ flex:1, padding:"5px 0", borderRadius:7, border:"1px solid rgba(255,255,255,0.1)", background:"rgba(255,255,255,0.04)", color:"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:11, fontWeight:700 }}>All</button>
         </div>
-        <button onClick={placeAll} disabled={placing||slip.every(function(b){ return !(parseFloat(stakes[b.key])>=1); })} style={{ width:"100%", padding:"13px", background:placing?"rgba(255,255,255,0.08)":"#e8ff47", color:placing?"rgba(255,255,255,0.3)":"#060d1a", border:"none", borderRadius:11, fontWeight:900, cursor:"pointer", fontSize:15 }}>
-          {placing ? "Placing..." : "Place " + slip.length + " Bet" + (slip.length>1?"s":"")}
-        </button>
+        <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <div style={{ flex:1, position:"relative" }}>
+            <span style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.4)", fontSize:13 }}>$</span>
+            <input value={stake} onChange={function(e){ setStake(e.target.value); }} type="number" placeholder="Stake" style={{ width:"100%", padding:"10px 10px 10px 24px", borderRadius:8, background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.12)", color:"#fff", fontSize:15, outline:"none", fontWeight:700, boxSizing:"border-box" }} />
+          </div>
+          <div style={{ textAlign:"center", minWidth:72 }}>
+            <div style={{ fontSize:9, color:"rgba(255,255,255,0.35)" }}>WIN</div>
+            <div style={{ fontSize:15, fontWeight:900, color:potential>0?"#4ade80":"rgba(255,255,255,0.2)" }}>{potential>0?fmt(potential):"--"}</div>
+          </div>
+          <button onClick={placeAcca} disabled={placing||stakeAmt<1||stakeAmt>balance} style={{ padding:"10px 18px", background:(placing||stakeAmt<1||stakeAmt>balance)?"rgba(255,255,255,0.08)":"#e8ff47", color:(placing||stakeAmt<1||stakeAmt>balance)?"rgba(255,255,255,0.3)":"#060d1a", border:"none", borderRadius:9, fontWeight:900, cursor:(placing||stakeAmt<1||stakeAmt>balance)?"not-allowed":"pointer", fontSize:14 }}>
+            {placing ? "..." : "BET"}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
+
 
 function MatchModal({ match: m, onClose, onAddToBetSlip, slip, balance, favMatches, onToggleFavMatch }) {
   var lc = m.leagueColor || "#e8ff47";
@@ -537,27 +540,21 @@ export default function App() {
     setBetSlip(function(prev){ return prev.filter(function(b){ return b.key!==key; }); });
   }, []);
 
-  var placeAllBets = useCallback(function(betsWithAmounts) {
-    var promises = betsWithAmounts.map(function(b) {
-      return api("/bet", { method:"POST", body:{
-        fixtureId:b.fixtureId, matchLabel:b.matchLabel,
-        league:b.league, leagueId:b.leagueId,
-        optionLabel:b.optLabel, market:b.marketLabel,
-        amount:b.amount, odds:b.odds, potential:b.potential, matchTime:b.matchTime,
-      }});
-    });
-    return Promise.allSettled(promises).then(function(results) {
-      var won = results.filter(function(r){ return r.status==="fulfilled"; });
-      var fail = results.filter(function(r){ return r.status==="rejected"; });
-      if (won.length) {
-        var lastBalance = won[won.length-1].value.balance;
-        setUser(function(u){ return Object.assign({},u,{ balance:lastBalance, bets:(u.bets||[]).concat(won.map(function(r){ return r.value.bet; })) }); });
-        setBetSlip([]);
-        showToast(won.length+" bet"+(won.length>1?"s":"")+" placed!", "#4ade80");
-        setTimeout(refreshUser, 5000);
-      }
-      if (fail.length) showToast(fail.length+" bet"+(fail.length>1?"s":"")+" failed: "+fail[0].reason.message, "#f87171");
-    });
+  var placeAllBets = useCallback(function(bets) {
+    // bets is always a single-item array (the acca bet)
+    var b = bets[0];
+    return api("/bet", { method:"POST", body:{
+      fixtureId: b.fixtureId, matchLabel: b.matchLabel,
+      league: b.league, leagueId: b.leagueId,
+      optionLabel: b.optLabel, market: b.marketLabel,
+      amount: b.amount, odds: b.odds, potential: b.potential, matchTime: b.matchTime,
+    }}).then(function(d) {
+      setUser(function(u){ return Object.assign({},u,{ balance:d.balance, bets:(u.bets||[]).concat([d.bet]) }); });
+      setBetSlip([]);
+      var label = b.isAcca ? b.legs.length+"-fold acca placed!" : "Bet placed!";
+      showToast(label + " Win: " + fmt(b.potential), "#4ade80");
+      setTimeout(refreshUser, 5000);
+    }).catch(function(e){ showToast(e.message, "#f87171"); });
   }, []);
 
   var watchAd = function() {
