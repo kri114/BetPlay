@@ -39,20 +39,20 @@ const delay = ms => new Promise(r => setTimeout(r, ms));
 
 // AllSportsAPI league IDs
 const LEAGUES = [
-  { id: 152, name: "Premier League",   country: "England", color: "#3b82f6" },
-  { id: 175, name: "Champions League", country: "Europe",  color: "#fbbf24" },
-  { id: 302, name: "La Liga",          country: "Spain",   color: "#ef4444" },
-  { id: 207, name: "Bundesliga",       country: "Germany", color: "#f59e0b" },
+  { id: 148, name: "Premier League",   country: "England", color: "#3b82f6" },
+  { id: 149, name: "Champions League", country: "Europe",  color: "#fbbf24" },
+  { id: 150, name: "La Liga",          country: "Spain",   color: "#ef4444" },
+  { id: 151, name: "Bundesliga",       country: "Germany", color: "#f59e0b" },
   { id: 207, name: "Serie A",          country: "Italy",   color: "#10b981" },
   { id: 168, name: "Ligue 1",          country: "France",  color: "#8b5cf6" },
 ];
 
 // Deduplicated league list for fetching
 const FETCH_LEAGUES = [
-  { id: 152, name: "Premier League",   country: "England", color: "#3b82f6" },
-  { id: 175, name: "Champions League", country: "Europe",  color: "#fbbf24" },
-  { id: 302, name: "La Liga",          country: "Spain",   color: "#ef4444" },
-  { id: 207, name: "Bundesliga",       country: "Germany", color: "#f59e0b" },
+  { id: 148, name: "Premier League",   country: "England", color: "#3b82f6" },
+  { id: 149, name: "Champions League", country: "Europe",  color: "#fbbf24" },
+  { id: 150, name: "La Liga",          country: "Spain",   color: "#ef4444" },
+  { id: 151, name: "Bundesliga",       country: "Germany", color: "#f59e0b" },
   { id: 207, name: "Serie A",          country: "Italy",   color: "#10b981" },
   { id: 168, name: "Ligue 1",          country: "France",  color: "#8b5cf6" },
 ];
@@ -410,8 +410,18 @@ app.post("/api/settle", auth, async (req, res) => {
 
 app.get("/api/test", async (req, res) => {
   try {
-    const data = await apiFetch({ met: "Fixtures", leagueId: 152, from: new Date().toISOString().split("T")[0], to: new Date(Date.now()+7*86400000).toISOString().split("T")[0] });
-    res.json({ ok: true, fixtures: data.length, db: !!db });
+    // Test each league and report back what we find
+    const results = {};
+    for (const league of FETCH_LEAGUES) {
+      try {
+        const from = new Date().toISOString().split("T")[0];
+        const to = new Date(Date.now()+14*86400000).toISOString().split("T")[0];
+        const data = await apiFetch({ met: "Fixtures", leagueId: league.id, from, to });
+        results[league.name] = { id: league.id, count: data.length, sample: data[0] ? data[0].league_name : "none" };
+      } catch(e) { results[league.name] = { error: e.message }; }
+      await delay(500);
+    }
+    res.json({ ok: true, db: !!db, leagues: results });
   } catch(e) { res.json({ error: e.message }); }
 });
 
