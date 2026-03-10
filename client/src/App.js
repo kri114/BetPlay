@@ -510,12 +510,20 @@ export default function App() {
   }, []);
 
   var fetchMatches = useCallback(function(silent) {
-    if (!silent) setLoading(true);
-    setFetchError(null);
+    if (!silent) { setLoading(true); setFetchError(null); }
     api("/fixtures")
-      .then(function(data){ setMatches((data.response||[]).map(parseFixture)); })
-      .catch(function(e){ if(!silent) setFetchError(e.message); })
-      .finally(function(){ setLoading(false); });
+      .then(function(data){
+        if (data.loading) {
+          setFetchError("loading");
+          setTimeout(function(){ fetchMatches(false); }, 5000);
+          setLoading(false);
+          return;
+        }
+        setMatches((data.response||[]).map(parseFixture));
+        setFetchError(null);
+        setLoading(false);
+      })
+      .catch(function(e){ setLoading(false); if(!silent) setFetchError(e.message); });
   }, []);
 
   var refreshUser = useCallback(function() {
@@ -724,9 +732,14 @@ export default function App() {
             </div>
             <div style={{ flex:1, minWidth:0 }}>
               <input value={search} onChange={function(e){ setSearch(e.target.value); }} placeholder="Search teams..." style={{ width:"100%", padding:"8px 12px", borderRadius:9, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", color:"#fff", fontSize:12, outline:"none", marginBottom:10, boxSizing:"border-box" }} />
-              {fetchError && <div style={{ padding:"10px 12px", background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.2)", borderRadius:10, marginBottom:10, fontSize:11, color:"#f87171", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              {fetchError && fetchError !== "loading" && <div style={{ padding:"10px 12px", background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.2)", borderRadius:10, marginBottom:10, fontSize:11, color:"#f87171", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <span>{fetchError}</span>
-                <button onClick={function(){ fetchMatches(); }} style={{ background:"none", border:"1px solid #f87171", color:"#f87171", borderRadius:5, padding:"2px 8px", cursor:"pointer", fontSize:10 }}>Retry</button>
+                <button onClick={function(){ fetchMatches(false); }} style={{ background:"none", border:"1px solid #f87171", color:"#f87171", borderRadius:5, padding:"2px 8px", cursor:"pointer", fontSize:10 }}>Retry</button>
+              </div>}
+              {fetchError === "loading" && <div style={{ padding:"16px 12px", background:"rgba(232,255,71,0.05)", border:"1px solid rgba(232,255,71,0.15)", borderRadius:10, marginBottom:10, textAlign:"center" }}>
+                <div style={{ width:18, height:18, border:"2px solid rgba(232,255,71,0.15)", borderTop:"2px solid #e8ff47", borderRadius:"50%", margin:"0 auto 8px", animation:"spin 0.8s linear infinite" }} />
+                <div style={{ fontSize:12, color:"#e8ff47", fontWeight:700 }}>Loading matches...</div>
+                <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:3 }}>Fetching live data, ready in ~20s</div>
               </div>}
               {loading && <Loader />}
               {!loading && matches.length===0 && !fetchError && (
