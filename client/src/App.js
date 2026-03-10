@@ -16,12 +16,8 @@ async function api(path, opts) {
 const fmt = function(n) { return "$" + Number(n).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); };
 const lcol = function(id) {
   var MAP = {
-    "39":"#3b82f6","PL":"#3b82f6",
-    "2":"#fbbf24","CL":"#fbbf24",
-    "140":"#ef4444","PD":"#ef4444",
-    "78":"#f59e0b","BL1":"#f59e0b",
-    "135":"#10b981","SA":"#10b981",
-    "61":"#8b5cf6","FL1":"#8b5cf6",
+    "152":"#3b82f6","175":"#fbbf24","302":"#ef4444",
+    "207":"#f59e0b","244":"#10b981","168":"#8b5cf6",
   };
   return MAP[String(id)] || "#e8ff47";
 };
