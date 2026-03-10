@@ -16,8 +16,19 @@ async function api(path, opts) {
 const fmt = function(n) { return "$" + Number(n).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); };
 const lcol = function(id) {
   var MAP = {
-    "152":"#3b82f6","175":"#fbbf24","302":"#ef4444",
-    "207":"#f59e0b","244":"#10b981","168":"#8b5cf6",
+    "eng.1":"#3b82f6","uefa.champions":"#fbbf24","esp.1":"#ef4444","ger.1":"#f59e0b","ita.1":"#10b981","fra.1":"#8b5cf6",
+    "uefa.europa":"#f97316","uefa.europa.conf":"#06b6d4","eng.2":"#60a5fa","esp.2":"#fca5a5","ger.2":"#fcd34d",
+    "ita.2":"#6ee7b7","fra.2":"#c4b5fd","ned.1":"#f87171","por.1":"#4ade80","sco.1":"#818cf8",
+    "bel.1":"#fb923c","tur.1":"#e879f9","gre.1":"#38bdf8","rus.1":"#a78bfa",
+    "eng.fa":"#93c5fd","eng.league_cup":"#86efac","esp.copa_del_rey":"#fda4af","ger.dfb_pokal":"#fde68a",
+    "ita.coppa_italia":"#a7f3d0","fra.coupe_de_france":"#ddd6fe",
+    "usa.1":"#67e8f9","bra.1":"#bbf7d0","arg.1":"#fef08a","mex.1":"#fed7aa","col.1":"#fecdd3",
+    "chi.1":"#e0e7ff","conmebol.libertadores":"#fef3c7","conmebol.sudamericana":"#ede9fe",
+    "concacaf.champions":"#cffafe","ksa.1":"#d1fae5","jpn.1":"#fee2e2","chn.1":"#fce7f3",
+    "ind.1":"#e0f2fe","afc.champions":"#f0fdf4","caf.champions":"#fef9c3",
+    "fifa.world":"#ecfdf5","uefa.euro":"#eff6ff","conmebol.america":"#fff7ed",
+    "uefa.nations":"#f5f3ff","fifa.cwc":"#fdf2f8",
+    "eng.w.1":"#fce7f3","uefa.wchampions":"#fdf4ff","usa.nwsl":"#f0f9ff","fifa.wwc":"#fef2f2",
   };
   return MAP[String(id)] || "#e8ff47";
 };
