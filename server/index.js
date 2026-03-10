@@ -416,29 +416,48 @@ app.get("/api/fixtures", auth, (req, res) => {
 app.get("/api/fixtures/:id/stats", auth, async (req, res) => {
   try {
     const raw = await fetch(API_BASE+"/matches/"+req.params.id, { headers:{ "X-Auth-Token":API_KEY } }).then(r=>r.json());
-    const m = (raw.id?raw:raw.match)||raw;
-    const ft = m.score&&m.score.fullTime;
-    const ht = m.score&&m.score.halfTime;
-    const events = (m.goals||[]).map(g => ({
-      type:"Goal",
-      player:{ name:(g.scorer&&g.scorer.name)||"Unknown" },
-      team:  { name:(g.team&&g.team.name)||"" },
-      time:  { elapsed:g.minute },
+    // football-data.org v4 returns { match: {...} } or directly the match object
+    const m = (raw.match && raw.match.id) ? raw.match : (raw.id ? raw : raw.match || raw);
+
+    const ft = m.score && m.score.fullTime;
+    const ht = m.score && m.score.halfTime;
+
+    // Goals are in m.goals array: { minute, team:{id,name}, scorer:{id,name}, assist:{id,name} }
+    const events = (m.goals || []).map(g => ({
+      type: "Goal",
+      player: { name: (g.scorer && g.scorer.name) || "Unknown" },
+      team:   { name: (g.team   && g.team.name)   || "" },
+      time:   { elapsed: g.minute },
     }));
+
+    // Lineups: football-data.org v4 uses startingXI and substitutes (not lineup/bench)
+    const mapPlayer = p => ({ name: p.name || "", shirtNumber: p.shirtNumber || null, position: p.position || null });
+    const ht2 = m.homeTeam || {};
+    const at2 = m.awayTeam || {};
+
+    const homeLineup = (ht2.startingXI || ht2.lineup || []).map(mapPlayer);
+    const awayLineup = (at2.startingXI || at2.lineup || []).map(mapPlayer);
+    const homeBench  = (ht2.substitutes || ht2.bench  || []).map(mapPlayer);
+    const awayBench  = (at2.substitutes || at2.bench  || []).map(mapPlayer);
+
     res.json({
-      events, fullTime:ft||null, halfTime:ht||null,
-      status:m.status, elapsed:m.minute||null,
-      winner:(m.score&&m.score.winner)||null,
-      homeTeam:(m.homeTeam&&m.homeTeam.name)||"",
-      awayTeam:(m.awayTeam&&m.awayTeam.name)||"",
-      referees:(m.referees||[]).map(r=>r.name).join(", "),
-      venue:m.venue||"", attendance:m.attendance||null,
-      lineups:{
-        home:{ formation:(m.homeTeam&&m.homeTeam.formation)||null, lineup:(m.homeTeam&&m.homeTeam.lineup)||[], bench:(m.homeTeam&&m.homeTeam.bench)||[] },
-        away:{ formation:(m.awayTeam&&m.awayTeam.formation)||null, lineup:(m.awayTeam&&m.awayTeam.lineup)||[], bench:(m.awayTeam&&m.awayTeam.bench)||[] },
+      events,
+      fullTime:  ft || null,
+      halfTime:  ht || null,
+      status:    m.status,
+      elapsed:   m.minute || null,
+      winner:    (m.score && m.score.winner) || null,
+      homeTeam:  ht2.name || "",
+      awayTeam:  at2.name || "",
+      referees:  (m.referees || []).map(r => r.name).join(", "),
+      venue:     m.venue || "",
+      attendance: m.attendance || null,
+      lineups: {
+        home: { formation: ht2.formation || null, lineup: homeLineup, bench: homeBench },
+        away: { formation: at2.formation || null, lineup: awayLineup, bench: awayBench },
       },
     });
-  } catch(e) { res.status(500).json({ error:e.message }); }
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post("/api/settle", auth, async (req, res) => {
