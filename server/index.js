@@ -149,7 +149,7 @@ async function buildFixtures() {
     const all = [], seen = new Set();
     for (const league of LEAGUES) {
       try {
-        const fixtures = await apiFetch("/fixtures?league=" + league.id + "&season=2024&from=" + df + "&to=" + dt);
+        const fixtures = await apiFetch("/fixtures?league=" + league.id + "&season=2025&from=" + df + "&to=" + dt);
         for (const f of fixtures) {
           const id = f.fixture && f.fixture.id;
           if (id && !seen.has(id)) { all.push(parseFixture(f)); seen.add(id); }
@@ -412,7 +412,7 @@ app.post("/api/settle", auth, async (req, res) => {
 
 app.get("/api/test", async (req, res) => {
   try {
-    const data = await apiFetch("/fixtures?league=39&season=2024&next=3");
+    const data = await apiFetch("/fixtures?league=39&season=2025&next=3");
     res.json({ ok: true, fixtures: data.length, db: !!db });
   } catch(e) { res.json({ error: e.message }); }
 });
