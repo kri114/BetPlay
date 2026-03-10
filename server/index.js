@@ -467,8 +467,34 @@ app.post("/api/settle", auth, async (req, res) => {
 app.get("/api/test", async (req, res) => {
   try {
     const data = await fetch(API_BASE+"/competitions/PL/matches?status=SCHEDULED", { headers:{ "X-Auth-Token":API_KEY } }).then(r=>r.json());
-    res.json({ ok:true, scheduled:data.matches&&data.matches.length, db:!!db, aiOdds:!!ANTHROPIC_KEY });
+    res.json({ ok:true, scheduled:data.matches&&data.matches.length, db:!!db });
   } catch(e) { res.json({ error:e.message }); }
+});
+
+// Debug: dump raw match data to diagnose lineup fields
+app.get("/api/debug/:id", async (req, res) => {
+  try {
+    const raw = await fetch(API_BASE+"/matches/"+req.params.id, { headers:{ "X-Auth-Token":API_KEY } }).then(r=>r.json());
+    const m = (raw.match && raw.match.id) ? raw.match : (raw.id ? raw : raw.match || raw);
+    res.json({
+      status: m.status,
+      minute: m.minute,
+      hasGoals: !!(m.goals && m.goals.length),
+      goalCount: (m.goals||[]).length,
+      homeTeamKeys: m.homeTeam ? Object.keys(m.homeTeam) : [],
+      awayTeamKeys: m.awayTeam ? Object.keys(m.awayTeam) : [],
+      homeTeamSample: m.homeTeam ? {
+        name: m.homeTeam.name,
+        formation: m.homeTeam.formation,
+        startingXICount: (m.homeTeam.startingXI||[]).length,
+        substitutesCount: (m.homeTeam.substitutes||[]).length,
+        lineupCount: (m.homeTeam.lineup||[]).length,
+        benchCount: (m.homeTeam.bench||[]).length,
+        firstPlayer: (m.homeTeam.startingXI||m.homeTeam.lineup||[])[0] || null,
+      } : null,
+      rawTopKeys: Object.keys(raw),
+    });
+  } catch(e) { res.json({ error: e.message }); }
 });
 
 app.use(express.static(path.join(__dirname, "build")));
