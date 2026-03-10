@@ -15,7 +15,7 @@ async function api(path, opts) {
 
 const fmt = function(n) { return "$" + Number(n).toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 }); };
 const lcol = function(id) {
-  var MAP = { "PL":"#3b82f6","CL":"#fbbf24","PD":"#ef4444","BL1":"#f59e0b","SA":"#10b981","FL1":"#8b5cf6","PPL":"#22c55e","ELC":"#60a5fa","BSA":"#84cc16","CLI":"#f97316" };
+  var MAP = { "PL":"#3b82f6","CL":"#fbbf24","PD":"#ef4444","BL1":"#f59e0b","SA":"#10b981","FL1":"#8b5cf6" };
   return MAP[id] || "#e8ff47";
 };
 
@@ -54,8 +54,8 @@ function getAllMarkets(m) {
       { label:"No",  odds: bf?2.10:1.95 },
     ]},
     { id:"ou15", label:"Over / Under 1.5 Goals", options:[
-      { label:"Over 1.5",  odds:1.35 },
-      { label:"Under 1.5", odds:3.00 },
+      { label:"Over 1.5",  odds:+(Math.max(1.10, 1.35 - (m.homeScore||0)-(m.awayScore||0)*0.1)).toFixed(2) },
+      { label:"Under 1.5", odds:+(Math.min(9.00, 3.00 + (m.homeScore||0)+(m.awayScore||0)*0.5)).toFixed(2) },
     ]},
     { id:"ou25", label:"Over / Under 2.5 Goals", options:[
       { label:"Over 2.5",  odds:1.88 },
@@ -99,7 +99,7 @@ function Loader() {
 
 function LiveBadge({ elapsed }) {
   return <span style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:11, color:"#ef4444", fontWeight:800 }}>
-    <span style={{ width:6, height:6, borderRadius:"50%", background:"#ef4444", display:"inline-block", animation:"pulse 1s infinite" }} />
+    <span style={{ width:6, height:6, borderRadius:"50%", background:"#ef4444", display:"inline-block", animation:"pulse 1.2s infinite" }} />
     {elapsed ? elapsed + "'" : "LIVE"}
   </span>;
 }
@@ -112,15 +112,99 @@ function PlayerRow({ p }) {
   </div>;
 }
 
-function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFavMatch }) {
+// -- Multi-bet slip (global, outside modal) ------------------------------------
+function BetSlip({ slip, onRemove, onClear, onPlaceAll, balance }) {
+  var [stakes, setStakes] = useState({});
+  var [placing, setPlacing] = useState(false);
+
+  var totalStake = slip.reduce(function(s, b) { return s + (parseFloat(stakes[b.key])||0); }, 0);
+  var totalPotential = slip.reduce(function(s, b) {
+    var amt = parseFloat(stakes[b.key])||0;
+    return s + Math.round(amt * b.odds * 100)/100;
+  }, 0);
+
+  var setStake = function(key, val) {
+    setStakes(function(prev) { return Object.assign({}, prev, { [key]: val }); });
+  };
+
+  var setQuick = function(key, amt) {
+    setStake(key, String(Math.min(amt, balance)));
+  };
+
+  var placeAll = function() {
+    var valid = slip.filter(function(b) { return parseFloat(stakes[b.key])>=1; });
+    if (!valid.length) return;
+    setPlacing(true);
+    onPlaceAll(valid.map(function(b) {
+      return Object.assign({}, b, { amount: parseFloat(stakes[b.key]), potential: Math.round(parseFloat(stakes[b.key])*b.odds*100)/100 });
+    })).finally(function(){ setPlacing(false); });
+  };
+
+  if (!slip.length) return null;
+
+  return (
+    <div style={{ position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)", width:"100%", maxWidth:480, zIndex:150, background:"#0b1526", borderTop:"2px solid #e8ff47", boxShadow:"0 -8px 40px rgba(0,0,0,0.8)" }}>
+      <div style={{ padding:"10px 14px 4px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <span style={{ fontWeight:900, fontSize:13, color:"#e8ff47" }}>BET SLIP ({slip.length})</span>
+        <button onClick={onClear} style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:11 }}>Clear all</button>
+      </div>
+      <div style={{ maxHeight:320, overflowY:"auto", padding:"0 14px" }}>
+        {slip.map(function(b) {
+          var lc = lcol(b.leagueId);
+          var amt = stakes[b.key] || "";
+          var pot = amt && parseFloat(amt)>0 ? Math.round(parseFloat(amt)*b.odds*100)/100 : 0;
+          return (
+            <div key={b.key} style={{ background:"rgba(255,255,255,0.04)", borderLeft:"3px solid "+lc, borderRadius:10, padding:"10px 12px", marginBottom:8 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontSize:10, color:lc, fontWeight:700 }}>{b.matchLabel}</div>
+                  <div style={{ fontWeight:800, fontSize:13, marginTop:1 }}>{b.optLabel}</div>
+                  <div style={{ fontSize:10, color:"rgba(255,255,255,0.35)" }}>{b.marketLabel}</div>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0, marginLeft:8 }}>
+                  <span style={{ fontSize:18, fontWeight:900, color:lc }}>{b.odds}x</span>
+                  <button onClick={function(){ onRemove(b.key); }} style={{ background:"rgba(248,113,113,0.15)", border:"none", color:"#f87171", borderRadius:5, width:22, height:22, cursor:"pointer", fontSize:14, lineHeight:1 }}>x</button>
+                </div>
+              </div>
+              <div style={{ display:"flex", gap:4, marginBottom:5 }}>
+                {[5,10,25,50].map(function(q) {
+                  return <button key={q} onClick={function(){ setQuick(b.key, q); }} style={{ flex:1, padding:"4px 0", borderRadius:6, border:amt===String(Math.min(q,balance))?"1px solid "+lc:"1px solid rgba(255,255,255,0.08)", background:amt===String(Math.min(q,balance))?lc+"18":"rgba(255,255,255,0.04)", color:amt===String(Math.min(q,balance))?lc:"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:11, fontWeight:700 }}>${q}</button>;
+                })}
+              </div>
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <div style={{ flex:1, position:"relative" }}>
+                  <span style={{ position:"absolute", left:10, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.4)", fontSize:13 }}>$</span>
+                  <input value={amt} onChange={function(e){ setStake(b.key, e.target.value); }} type="number" placeholder="Stake" style={{ width:"100%", padding:"8px 8px 8px 22px", borderRadius:7, background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.1)", color:"#fff", fontSize:13, outline:"none", fontWeight:700, boxSizing:"border-box" }} />
+                </div>
+                <div style={{ textAlign:"right", minWidth:64 }}>
+                  <div style={{ fontSize:9, color:"rgba(255,255,255,0.35)" }}>WIN</div>
+                  <div style={{ fontSize:14, fontWeight:900, color:pot>0?"#4ade80":"rgba(255,255,255,0.2)" }}>{pot>0?fmt(pot):"--"}</div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ padding:"8px 14px 20px", borderTop:"1px solid rgba(255,255,255,0.08)", marginTop:4 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:8 }}>
+          <span style={{ color:"rgba(255,255,255,0.4)" }}>Total stake: <span style={{ color:"#fff", fontWeight:700 }}>{fmt(totalStake)}</span></span>
+          <span style={{ color:"rgba(255,255,255,0.4)" }}>Total win: <span style={{ color:"#4ade80", fontWeight:700 }}>{fmt(totalPotential)}</span></span>
+        </div>
+        <button onClick={placeAll} disabled={placing||slip.every(function(b){ return !(parseFloat(stakes[b.key])>=1); })} style={{ width:"100%", padding:"13px", background:placing?"rgba(255,255,255,0.08)":"#e8ff47", color:placing?"rgba(255,255,255,0.3)":"#060d1a", border:"none", borderRadius:11, fontWeight:900, cursor:"pointer", fontSize:15 }}>
+          {placing ? "Placing..." : "Place " + slip.length + " Bet" + (slip.length>1?"s":"")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MatchModal({ match: m, onClose, onAddToBetSlip, slip, balance, favMatches, onToggleFavMatch }) {
   var lc = m.leagueColor || "#e8ff47";
   var isLive = m.status === "live";
   var isFT   = m.status === "finished";
   var isFav  = favMatches.has(m.id);
   var markets = getAllMarkets(m);
 
-  var [slip,       setSlip]       = useState(null);
-  var [amt,        setAmt]        = useState("");
   var [tab,        setTab]        = useState("markets");
   var [detail,     setDetail]     = useState(null);
   var [detailLoad, setDetailLoad] = useState(false);
@@ -142,15 +226,6 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
     return function() { clearInterval(t); };
   }, [tab, isLive]);
 
-  var potential = slip && amt && parseFloat(amt) > 0 ? Math.round(parseFloat(amt) * slip.odds * 100) / 100 : 0;
-
-  var doPlace = function() {
-    var a = parseFloat(amt);
-    if (!a || a < 1 || !slip) return;
-    onBet(m, slip.optLabel, a, slip.odds, slip.marketLabel);
-    onClose();
-  };
-
   var goals      = detail && detail.events ? detail.events.filter(function(e) { return e.type === "Goal"; }) : [];
   var homeLineup = (detail && detail.lineups && detail.lineups.home && detail.lineups.home.lineup) || [];
   var awayLineup = (detail && detail.lineups && detail.lineups.away && detail.lineups.away.lineup) || [];
@@ -160,21 +235,32 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
   var awayForm   = detail && detail.lineups && detail.lineups.away && detail.lineups.away.formation;
   var hasLineups = homeLineup.length > 0 || awayLineup.length > 0;
 
+  var addBet = function(market, opt) {
+    var key = m.fixtureId + "|" + market.id + "|" + opt.label;
+    onAddToBetSlip({
+      key, fixtureId: m.fixtureId, matchLabel: m.home + " vs " + m.away,
+      league: m.league, leagueId: m.leagueId,
+      marketId: market.id, marketLabel: market.label,
+      optLabel: opt.label, odds: opt.odds, matchTime: m.time,
+    });
+  };
+
+  var slipKeys = new Set(slip.map(function(b) { return b.key; }));
+
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.92)", zIndex:200, display:"flex", alignItems:"flex-end", justifyContent:"center" }} onClick={onClose}>
-      <div style={{ width:"100%", maxWidth:480, background:"#0b1120", borderRadius:"22px 22px 0 0", maxHeight:"96vh", display:"flex", flexDirection:"column" }} onClick={function(e){ e.stopPropagation(); }}>
+      <div style={{ width:"100%", maxWidth:480, background:"#0b1120", borderRadius:"22px 22px 0 0", maxHeight:"92vh", display:"flex", flexDirection:"column" }} onClick={function(e){ e.stopPropagation(); }}>
 
         <div style={{ padding:"16px 16px 0", background:"linear-gradient(160deg,"+lc+"20,transparent 60%)", flexShrink:0 }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
             <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              {m.leagueLogo && <img src={m.leagueLogo} alt="" style={{ width:15, height:15, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
+              {m.leagueLogo && <img src={m.leagueLogo} alt="" style={{ width:16, height:16, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
               <span style={{ fontSize:11, color:lc, fontWeight:800 }}>{m.league}</span>
-              {m.leagueCountry && <span style={{ fontSize:9, color:"rgba(255,255,255,0.25)" }}>{m.leagueCountry}</span>}
             </div>
             <div style={{ display:"flex", gap:8, alignItems:"center" }}>
               {isLive && <LiveBadge elapsed={m.elapsed} />}
               {isFT   && <span style={{ fontSize:10, color:"rgba(255,255,255,0.35)", fontWeight:700 }}>FT</span>}
-              <button onClick={function(){ onToggleFavMatch(m.id); }} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", padding:0, color:isFav?"#e8ff47":"rgba(255,255,255,0.3)", lineHeight:1 }}>{isFav?"-":"-"}</button>
+              <button onClick={function(){ onToggleFavMatch(m.id); }} style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", padding:0, color:isFav?"#e8ff47":"rgba(255,255,255,0.3)", lineHeight:1 }}>{isFav?"*":"o"}</button>
               <button onClick={onClose} style={{ background:"rgba(255,255,255,0.07)", border:"none", color:"rgba(255,255,255,0.6)", borderRadius:8, padding:"4px 12px", cursor:"pointer", fontSize:14 }}>X</button>
             </div>
           </div>
@@ -182,22 +268,28 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", paddingBottom:14 }}>
             <div style={{ flex:1, textAlign:"center" }}>
               {m.homeLogo && <img src={m.homeLogo} alt="" style={{ width:42, height:42, objectFit:"contain", marginBottom:5 }} onError={function(e){ e.target.style.display="none"; }} />}
-              <div style={{ fontWeight:900, fontSize:13, lineHeight:1.2 }}>{m.home}</div>
+              <div style={{ fontWeight:900, fontSize:13 }}>{m.home}</div>
             </div>
             <div style={{ textAlign:"center", minWidth:90 }}>
               {(isLive||isFT)
                 ? <div>
-                    <div style={{ fontSize:36, fontWeight:900, letterSpacing:4 }}>{m.homeScore} - {m.awayScore}</div>
-                    {isLive && m.elapsed && <div style={{ fontSize:11, color:"#ef4444", fontWeight:700, marginTop:2 }}>{m.elapsed}'</div>}
+                    <div style={{ fontSize:34, fontWeight:900, letterSpacing:4 }}>{m.homeScore} - {m.awayScore}</div>
+                    {isLive && m.elapsed && <div style={{ fontSize:12, color:"#ef4444", fontWeight:800, marginTop:2 }}>{m.elapsed}"</div>}
                   </div>
                 : <div><div style={{ fontSize:13, color:lc, fontWeight:900 }}>VS</div><div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:3 }}>{m.time}</div></div>
               }
             </div>
             <div style={{ flex:1, textAlign:"center" }}>
               {m.awayLogo && <img src={m.awayLogo} alt="" style={{ width:42, height:42, objectFit:"contain", marginBottom:5 }} onError={function(e){ e.target.style.display="none"; }} />}
-              <div style={{ fontWeight:900, fontSize:13, lineHeight:1.2 }}>{m.away}</div>
+              <div style={{ fontWeight:900, fontSize:13 }}>{m.away}</div>
             </div>
           </div>
+
+          {slip.length > 0 && (
+            <div style={{ marginBottom:8, padding:"5px 10px", background:"rgba(232,255,71,0.08)", borderRadius:8, fontSize:11, color:"#e8ff47", fontWeight:700, textAlign:"center" }}>
+              {slip.length} bet{slip.length>1?"s":""} in slip - scroll down to place
+            </div>
+          )}
 
           <div style={{ display:"flex", gap:2 }}>
             {["markets","lineups","stats"].map(function(t) {
@@ -217,8 +309,10 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
                     <div style={{ fontSize:10, fontWeight:800, color:"rgba(255,255,255,0.35)", letterSpacing:1, marginBottom:7, textTransform:"uppercase" }}>{market.label}</div>
                     <div style={{ display:"grid", gridTemplateColumns:cols, gap:6 }}>
                       {market.options.map(function(opt,i) {
-                        var isSel = slip && slip.marketId===market.id && slip.optLabel===opt.label;
-                        return <button key={i} onClick={function(){ isSel?setSlip(null):setSlip({ marketId:market.id, marketLabel:market.label, optLabel:opt.label, odds:opt.odds }); }} style={{ padding:"9px 4px", borderRadius:10, cursor:"pointer", textAlign:"center", border:isSel?"2px solid "+lc:"1px solid rgba(255,255,255,0.09)", background:isSel?lc+"22":"rgba(255,255,255,0.04)", transition:"all 0.12s" }}>
+                        var key = m.fixtureId+"|"+market.id+"|"+opt.label;
+                        var isSel = slipKeys.has(key);
+                        return <button key={i} onClick={function(){ addBet(market, opt); }} style={{ padding:"9px 4px", borderRadius:10, cursor:"pointer", textAlign:"center", border:isSel?"2px solid "+lc:"1px solid rgba(255,255,255,0.09)", background:isSel?lc+"22":"rgba(255,255,255,0.04)", transition:"all 0.12s", position:"relative" }}>
+                          {isSel && <span style={{ position:"absolute", top:3, right:4, fontSize:8, color:lc, fontWeight:900 }}>IN SLIP</span>}
                           <div style={{ fontSize:9, color:isSel?lc:"rgba(255,255,255,0.4)", marginBottom:4, lineHeight:1.3 }}>{opt.label}</div>
                           <div style={{ fontSize:16, fontWeight:900, color:isSel?lc:"#fff" }}>{opt.odds}x</div>
                         </button>;
@@ -227,7 +321,7 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
                   </div>
                 );
               })}
-              <div style={{ height:slip?180:20 }} />
+              <div style={{ height:20 }} />
             </div>
           )}
 
@@ -241,8 +335,8 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
                   <div style={{ fontWeight:700, color:"rgba(255,255,255,0.5)", marginBottom:8 }}>
                     {!isLive&&!isFT ? "Lineups not announced yet" : "No lineup data available"}
                   </div>
-                  <div style={{ fontSize:12, color:"rgba(255,255,255,0.28)", lineHeight:1.7 }}>
-                    {!isLive&&!isFT ? "Usually published ~1 hour before kick-off" : "This match has no lineup data on the free API tier"}
+                  <div style={{ fontSize:12, color:"rgba(255,255,255,0.28)" }}>
+                    {!isLive&&!isFT ? "Usually published ~1 hour before kick-off" : "Not available on the free API tier"}
                   </div>
                 </div>
               )}
@@ -251,13 +345,13 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
                   <div>
                     <div style={{ fontSize:10, fontWeight:800, color:lc, marginBottom:8 }}>{m.home}{homeForm&&" ("+homeForm+")"}</div>
                     {homeLineup.map(function(p,i){ return <PlayerRow key={i} p={p} />; })}
-                    {homeBench.length>0 && <div style={{ fontSize:9, color:"rgba(255,255,255,0.3)", marginTop:10, marginBottom:5, fontWeight:800, letterSpacing:1 }}>BENCH</div>}
+                    {homeBench.length>0 && <div style={{ fontSize:9, color:"rgba(255,255,255,0.3)", marginTop:10, marginBottom:5, fontWeight:800 }}>BENCH</div>}
                     {homeBench.map(function(p,i){ return <PlayerRow key={"b"+i} p={p} />; })}
                   </div>
                   <div>
                     <div style={{ fontSize:10, fontWeight:800, color:lc, marginBottom:8 }}>{m.away}{awayForm&&" ("+awayForm+")"}</div>
                     {awayLineup.map(function(p,i){ return <PlayerRow key={i} p={p} />; })}
-                    {awayBench.length>0 && <div style={{ fontSize:9, color:"rgba(255,255,255,0.3)", marginTop:10, marginBottom:5, fontWeight:800, letterSpacing:1 }}>BENCH</div>}
+                    {awayBench.length>0 && <div style={{ fontSize:9, color:"rgba(255,255,255,0.3)", marginTop:10, marginBottom:5, fontWeight:800 }}>BENCH</div>}
                     {awayBench.map(function(p,i){ return <PlayerRow key={"b"+i} p={p} />; })}
                   </div>
                 </div>
@@ -284,7 +378,7 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
                         <span style={{ fontSize:12, fontWeight:700 }}>{m.home}</span>
                         <div style={{ textAlign:"center" }}>
                           <div style={{ fontSize:28, fontWeight:900, letterSpacing:4 }}>{detail.fullTime.home} - {detail.fullTime.away}</div>
-                          {isLive && detail.elapsed && <div style={{ fontSize:12, color:"#ef4444", fontWeight:800, marginTop:2 }}>{detail.elapsed}'</div>}
+                          {isLive && detail.elapsed && <div style={{ fontSize:12, color:"#ef4444", fontWeight:800, marginTop:2 }}>{detail.elapsed}"</div>}
                         </div>
                         <span style={{ fontSize:12, fontWeight:700 }}>{m.away}</span>
                       </div>
@@ -314,62 +408,26 @@ function MatchModal({ match: m, onClose, onBet, balance, favMatches, onToggleFav
             </div>
           )}
         </div>
-
-        {slip && (
-          <div style={{ flexShrink:0, borderTop:"1px solid "+lc+"44", background:"#0d1628", padding:"12px 14px 24px" }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
-              <div>
-                <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", marginBottom:2 }}>{slip.marketLabel}</div>
-                <div style={{ fontWeight:900, fontSize:15, color:lc }}>{slip.optLabel}</div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontSize:10, color:"rgba(255,255,255,0.4)", marginBottom:2 }}>Odds</div>
-                <div style={{ fontSize:22, fontWeight:900, color:lc }}>{slip.odds}x</div>
-              </div>
-            </div>
-            <div style={{ display:"flex", gap:6, marginBottom:8 }}>
-              {[5,10,25,50].map(function(q) {
-                return <button key={q} onClick={function(){ setAmt(String(Math.min(q,balance))); }} style={{ flex:1, padding:"6px 0", borderRadius:7, border:amt===String(q)?"1px solid "+lc:"1px solid rgba(255,255,255,0.1)", background:amt===String(q)?lc+"22":"rgba(255,255,255,0.05)", color:amt===String(q)?lc:"rgba(255,255,255,0.5)", cursor:"pointer", fontSize:12, fontWeight:700 }}>${q}</button>;
-              })}
-              <button onClick={function(){ setAmt(String(balance)); }} style={{ flex:1, padding:"6px 0", borderRadius:7, border:"1px solid rgba(255,255,255,0.1)", background:"rgba(255,255,255,0.05)", color:"rgba(255,255,255,0.5)", cursor:"pointer", fontSize:11, fontWeight:700 }}>All</button>
-            </div>
-            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-              <div style={{ flex:1, position:"relative" }}>
-                <span style={{ position:"absolute", left:12, top:"50%", transform:"translateY(-50%)", color:"rgba(255,255,255,0.4)", fontSize:14 }}>$</span>
-                <input value={amt} onChange={function(e){ setAmt(e.target.value); }} type="number" placeholder="0.00" style={{ width:"100%", padding:"11px 12px 11px 26px", borderRadius:9, background:"rgba(255,255,255,0.07)", border:"1px solid rgba(255,255,255,0.12)", color:"#fff", fontSize:15, outline:"none", fontWeight:700, boxSizing:"border-box" }} />
-              </div>
-              <div style={{ textAlign:"center", minWidth:70 }}>
-                <div style={{ fontSize:9, color:"rgba(255,255,255,0.4)" }}>WIN</div>
-                <div style={{ fontSize:15, fontWeight:900, color:potential>0?"#4ade80":"rgba(255,255,255,0.2)" }}>{potential>0?fmt(potential):"--"}</div>
-              </div>
-              <button onClick={doPlace} disabled={!amt||parseFloat(amt)<1} style={{ padding:"11px 20px", background:(!amt||parseFloat(amt)<1)?"rgba(255,255,255,0.08)":lc, color:(!amt||parseFloat(amt)<1)?"rgba(255,255,255,0.3)":"#060d1a", border:"none", borderRadius:9, fontWeight:900, cursor:(!amt||parseFloat(amt)<1)?"not-allowed":"pointer", fontSize:14 }}>BET</button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
 }
 
 function AuthScreen({ onLogin }) {
-  var [mode,m2]       = useState("login");
-  var setMode = m2;
-  var [username,setUsername] = useState("");
-  var [password,setPassword] = useState("");
-  var [error,setError]       = useState("");
-  var [loading,setLoading]   = useState(false);
-
+  var [mode,setMode]           = useState("login");
+  var [username,setUsername]   = useState("");
+  var [password,setPassword]   = useState("");
+  var [error,setError]         = useState("");
+  var [loading,setLoading]     = useState(false);
   var handle = function() {
     if (!username.trim()||!password.trim()) { setError("Fill in all fields"); return; }
     setLoading(true); setError("");
     api("/auth/"+mode, { method:"POST", body:{ username, password } })
-      .then(function(data){ localStorage.setItem("bp_token", data.token); onLogin(data.user); })
+      .then(function(d){ localStorage.setItem("bp_token",d.token); onLogin(d.user); })
       .catch(function(e){ setError(e.message); })
       .finally(function(){ setLoading(false); });
   };
-
   var inp = { width:"100%", padding:"13px 16px", borderRadius:10, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", color:"#fff", fontSize:15, outline:"none", boxSizing:"border-box", marginBottom:12, fontFamily:"Trebuchet MS,sans-serif" };
-
   return (
     <div style={{ minHeight:"100vh", background:"linear-gradient(160deg,#050a18,#0c1428)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:24, fontFamily:"Trebuchet MS,sans-serif" }}>
       <div style={{ marginBottom:36, textAlign:"center" }}>
@@ -406,8 +464,8 @@ export default function App() {
   var [leaderboard,setLeaderboard]     = useState([]);
   var [activeLeague,setActiveLeague]   = useState("live");
   var [search,setSearch]               = useState("");
+  var [betSlip,setBetSlip]             = useState([]);
 
-  // Favorites stored in localStorage
   var [favLeagues,setFavLeagues] = useState(function(){ return new Set(JSON.parse(localStorage.getItem("bp_favLeagues")||"[]")); });
   var [favMatches,setFavMatches] = useState(function(){ return new Set(JSON.parse(localStorage.getItem("bp_favMatches")||"[]")); });
   var [favTeams,setFavTeams]     = useState(function(){ return new Set(JSON.parse(localStorage.getItem("bp_favTeams")||"[]")); });
@@ -428,35 +486,25 @@ export default function App() {
 
   var showToast = useCallback(function(msg, color) {
     setToast({ msg, color:color||"#e8ff47" });
-    setTimeout(function(){ setToast(null); }, 3000);
+    setTimeout(function(){ setToast(null); }, 3500);
   }, []);
 
   var toggleFavLeague = useCallback(function(id) {
-    setFavLeagues(function(prev) {
-      var n = new Set(prev); n.has(id)?n.delete(id):n.add(id);
-      localStorage.setItem("bp_favLeagues", JSON.stringify(Array.from(n))); return n;
-    });
+    setFavLeagues(function(prev) { var n=new Set(prev); n.has(id)?n.delete(id):n.add(id); localStorage.setItem("bp_favLeagues",JSON.stringify(Array.from(n))); return n; });
   }, []);
-
   var toggleFavMatch = useCallback(function(id) {
-    setFavMatches(function(prev) {
-      var n = new Set(prev); n.has(id)?n.delete(id):n.add(id);
-      localStorage.setItem("bp_favMatches", JSON.stringify(Array.from(n))); return n;
-    });
+    setFavMatches(function(prev) { var n=new Set(prev); n.has(id)?n.delete(id):n.add(id); localStorage.setItem("bp_favMatches",JSON.stringify(Array.from(n))); return n; });
   }, []);
-
   var toggleFavTeam = useCallback(function(name) {
-    setFavTeams(function(prev) {
-      var n = new Set(prev); n.has(name)?n.delete(name):n.add(name);
-      localStorage.setItem("bp_favTeams", JSON.stringify(Array.from(n))); return n;
-    });
+    setFavTeams(function(prev) { var n=new Set(prev); n.has(name)?n.delete(name):n.add(name); localStorage.setItem("bp_favTeams",JSON.stringify(Array.from(n))); return n; });
   }, []);
 
   var fetchMatches = useCallback(function(silent) {
-    if (!silent) { setLoading(true); setFetchError(null); }
+    if (!silent) setLoading(true);
+    setFetchError(null);
     api("/fixtures")
       .then(function(data){ setMatches((data.response||[]).map(parseFixture)); })
-      .catch(function(e){ if (!silent) setFetchError(e.message); })
+      .catch(function(e){ if(!silent) setFetchError(e.message); })
       .finally(function(){ setLoading(false); });
   }, []);
 
@@ -472,20 +520,45 @@ export default function App() {
     return function(){ clearInterval(refreshRef.current); };
   }, [user]);
 
-  var handleBet = function(match, optionLabel, amount, odds, market) {
-    api("/bet", { method:"POST", body:{
-      fixtureId:match.fixtureId, matchLabel:match.home+" vs "+match.away,
-      league:match.league, leagueId:match.leagueId,
-      optionLabel, market, amount, odds,
-      potential:Math.round(amount*odds*100)/100, matchTime:match.time,
-    }})
-    .then(function(d) {
-      setUser(function(u){ return Object.assign({},u,{ balance:d.balance, bets:(u.bets||[]).concat([d.bet]) }); });
-      showToast("Bet placed! "+fmt(amount)+" @ "+odds+"x");
-      setTimeout(refreshUser, 5000);
-    })
-    .catch(function(e){ showToast(e.message, "#f87171"); });
-  };
+  var addToBetSlip = useCallback(function(bet) {
+    setBetSlip(function(prev) {
+      // If exact same selection: toggle off
+      var exact = prev.find(function(b){ return b.key===bet.key; });
+      if (exact) return prev.filter(function(b){ return b.key!==bet.key; });
+      // If same fixture+market but different option: replace (can't pick Home Win AND Draw)
+      var sameMarket = prev.find(function(b){ return b.fixtureId===bet.fixtureId && b.marketId===bet.marketId; });
+      if (sameMarket) return prev.map(function(b){ return (b.fixtureId===bet.fixtureId&&b.marketId===bet.marketId)?bet:b; });
+      // Different market or different match: add to slip
+      return [...prev, bet];
+    });
+  }, []);
+
+  var removeFromSlip = useCallback(function(key) {
+    setBetSlip(function(prev){ return prev.filter(function(b){ return b.key!==key; }); });
+  }, []);
+
+  var placeAllBets = useCallback(function(betsWithAmounts) {
+    var promises = betsWithAmounts.map(function(b) {
+      return api("/bet", { method:"POST", body:{
+        fixtureId:b.fixtureId, matchLabel:b.matchLabel,
+        league:b.league, leagueId:b.leagueId,
+        optionLabel:b.optLabel, market:b.marketLabel,
+        amount:b.amount, odds:b.odds, potential:b.potential, matchTime:b.matchTime,
+      }});
+    });
+    return Promise.allSettled(promises).then(function(results) {
+      var won = results.filter(function(r){ return r.status==="fulfilled"; });
+      var fail = results.filter(function(r){ return r.status==="rejected"; });
+      if (won.length) {
+        var lastBalance = won[won.length-1].value.balance;
+        setUser(function(u){ return Object.assign({},u,{ balance:lastBalance, bets:(u.bets||[]).concat(won.map(function(r){ return r.value.bet; })) }); });
+        setBetSlip([]);
+        showToast(won.length+" bet"+(won.length>1?"s":"")+" placed!", "#4ade80");
+        setTimeout(refreshUser, 5000);
+      }
+      if (fail.length) showToast(fail.length+" bet"+(fail.length>1?"s":"")+" failed: "+fail[0].reason.message, "#f87171");
+    });
+  }, []);
 
   var watchAd = function() {
     if (adCooldown>0) return;
@@ -495,7 +568,7 @@ export default function App() {
       .catch(function(e){ showToast(e.message, "#f87171"); });
   };
 
-  var logout = function(){ localStorage.removeItem("bp_token"); setUser(null); setMatches([]); };
+  var logout = function(){ localStorage.removeItem("bp_token"); setUser(null); setMatches([]); setBetSlip([]); };
 
   if (!user) return <AuthScreen onLogin={function(u){ setUser(u); }} />;
 
@@ -508,11 +581,10 @@ export default function App() {
   var totalWagered = bets.reduce(function(s,b){ return s+b.amount; },0);
   var totalWon     = wonBets.reduce(function(s,b){ return s+b.potential; },0);
 
-  // Build league list
   var leagueMap = new Map();
   matches.forEach(function(m) {
     if (!leagueMap.has(m.leagueId)) leagueMap.set(m.leagueId, { id:m.leagueId, name:m.league, color:m.leagueColor, logo:m.leagueLogo, country:m.leagueCountry, count:0, liveCount:0 });
-    var l = leagueMap.get(m.leagueId); l.count++;
+    var l=leagueMap.get(m.leagueId); l.count++;
     if (m.status==="live") l.liveCount++;
   });
   var allLeagues = Array.from(leagueMap.values()).sort(function(a,b) {
@@ -521,7 +593,6 @@ export default function App() {
     return b.liveCount-a.liveCount||a.name.localeCompare(b.name);
   });
 
-  // Filter matches for right panel
   var sl = search.toLowerCase();
   var rightMatches;
   if (activeLeague==="live") rightMatches = liveMatches;
@@ -537,35 +608,33 @@ export default function App() {
     var m=p.m, lc=m.leagueColor;
     var isLive=m.status==="live", isFT=m.status==="finished";
     var isFavMatch=favMatches.has(m.id);
-    var isFavHomeTeam=favTeams.has(m.home);
-    var isFavAwayTeam=favTeams.has(m.away);
+    var isFavHome=favTeams.has(m.home), isFavAway=favTeams.has(m.away);
     return (
       <div style={{ background:"rgba(255,255,255,0.04)", borderLeft:"3px solid "+lc, border:"1px solid rgba(255,255,255,0.07)", borderRadius:13, padding:"12px 13px", marginBottom:8 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
           <div style={{ display:"flex", alignItems:"center", gap:5 }}>
-            {m.leagueLogo && <img src={m.leagueLogo} alt="" style={{ width:13, height:13, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
+            {m.leagueLogo && <img src={m.leagueLogo} alt="" style={{ width:14, height:14, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
             <span style={{ fontSize:10, color:lc, fontWeight:800 }}>{m.league}</span>
-            {m.leagueCountry && <span style={{ fontSize:9, color:"rgba(255,255,255,0.2)" }}>{m.leagueCountry}</span>}
           </div>
           <div style={{ display:"flex", alignItems:"center", gap:7 }}>
             {isLive ? <LiveBadge elapsed={m.elapsed} /> : <span style={{ fontSize:10, fontWeight:700, color:isFT?"rgba(255,255,255,0.25)":"rgba(255,255,255,0.3)" }}>{isFT?"FT":m.time}</span>}
-            <button onClick={function(){ toggleFavMatch(m.id); }} title="Favourite match" style={{ background:"none", border:"none", fontSize:13, cursor:"pointer", padding:0, color:isFavMatch?"#e8ff47":"rgba(255,255,255,0.2)" }}>{isFavMatch?"-":"-"}</button>
+            <button onClick={function(){ toggleFavMatch(m.id); }} style={{ background:"none", border:"none", fontSize:13, cursor:"pointer", padding:0, color:isFavMatch?"#e8ff47":"rgba(255,255,255,0.2)" }}>{isFavMatch?"*":"o"}</button>
           </div>
         </div>
         <div onClick={function(){ setSelectedMatch(m); }} style={{ cursor:"pointer" }}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
             <div style={{ display:"flex", alignItems:"center", gap:6, flex:1 }}>
               {m.homeLogo && <img src={m.homeLogo} alt="" style={{ width:20, height:20, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
-              <span style={{ fontWeight:800, fontSize:13, color:isFavHomeTeam?"#e8ff47":"#fff" }}>{m.home}</span>
-              <button onClick={function(e){ e.stopPropagation(); toggleFavTeam(m.home); }} title={"Favourite "+m.home} style={{ background:"none", border:"none", fontSize:10, cursor:"pointer", padding:0, color:isFavHomeTeam?"#e8ff47":"rgba(255,255,255,0.15)" }}>{isFavHomeTeam?"-":"-"}</button>
+              <span style={{ fontWeight:800, fontSize:13, color:isFavHome?"#e8ff47":"#fff" }}>{m.home}</span>
+              <button onClick={function(e){ e.stopPropagation(); toggleFavTeam(m.home); }} style={{ background:"none", border:"none", fontSize:10, cursor:"pointer", padding:0, color:isFavHome?"#e8ff47":"rgba(255,255,255,0.15)" }}>{isFavHome?"*":"o"}</button>
             </div>
             {(isLive||isFT)
               ? <div style={{ fontSize:22, fontWeight:900, letterSpacing:2, minWidth:60, textAlign:"center" }}>{m.homeScore} - {m.awayScore}</div>
               : <div style={{ fontSize:10, color:"rgba(255,255,255,0.2)", padding:"3px 8px", background:"rgba(255,255,255,0.04)", borderRadius:5 }}>VS</div>
             }
             <div style={{ display:"flex", alignItems:"center", gap:6, flex:1, justifyContent:"flex-end" }}>
-              <button onClick={function(e){ e.stopPropagation(); toggleFavTeam(m.away); }} title={"Favourite "+m.away} style={{ background:"none", border:"none", fontSize:10, cursor:"pointer", padding:0, color:isFavAwayTeam?"#e8ff47":"rgba(255,255,255,0.15)" }}>{isFavAwayTeam?"-":"-"}</button>
-              <span style={{ fontWeight:800, fontSize:13, color:isFavAwayTeam?"#e8ff47":"#fff" }}>{m.away}</span>
+              <button onClick={function(e){ e.stopPropagation(); toggleFavTeam(m.away); }} style={{ background:"none", border:"none", fontSize:10, cursor:"pointer", padding:0, color:isFavAway?"#e8ff47":"rgba(255,255,255,0.15)" }}>{isFavAway?"*":"o"}</button>
+              <span style={{ fontWeight:800, fontSize:13, color:isFavAway?"#e8ff47":"#fff" }}>{m.away}</span>
               {m.awayLogo && <img src={m.awayLogo} alt="" style={{ width:20, height:20, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
             </div>
           </div>
@@ -584,9 +653,12 @@ export default function App() {
     );
   };
 
+  var slipCount = betSlip.length;
+  var bottomPad = slipCount > 0 ? 320 : 80;
+
   return (
     <div style={{ minHeight:"100vh", background:"#080d1a", fontFamily:"Trebuchet MS,sans-serif", color:"#fff", maxWidth:480, margin:"0 auto" }}>
-      <style>{"@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}} @keyframes toastIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}} ::-webkit-scrollbar{width:2px;height:2px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1)} input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none} input[type=number]{-moz-appearance:textfield}"}</style>
+      <style>{"@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.2}} @keyframes toastIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}} ::-webkit-scrollbar{width:2px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1)} input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none} input[type=number]{-moz-appearance:textfield}"}</style>
 
       <div style={{ padding:"14px 14px 0", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, background:"rgba(8,13,26,0.97)", backdropFilter:"blur(20px)", zIndex:100 }}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
@@ -594,6 +666,7 @@ export default function App() {
             <div style={{ display:"flex", alignItems:"center", gap:8 }}>
               <span style={{ fontSize:22, fontWeight:900, letterSpacing:-1.5 }}>BET<span style={{ color:"#e8ff47" }}>PLAY</span></span>
               {liveMatches.length>0 && <span style={{ fontSize:10, background:"#ef4444", color:"#fff", borderRadius:6, padding:"2px 7px", fontWeight:800 }}>{liveMatches.length} LIVE</span>}
+              {slipCount>0 && <span style={{ fontSize:10, background:"#e8ff47", color:"#060d1a", borderRadius:6, padding:"2px 7px", fontWeight:800 }}>{slipCount} BET{slipCount>1?"S":""}</span>}
             </div>
             <div style={{ fontSize:10, color:"rgba(255,255,255,0.3)", marginTop:1 }}>Hi, {user.username}</div>
           </div>
@@ -616,7 +689,7 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ padding:"12px 12px 80px" }}>
+      <div style={{ padding:"12px 12px", paddingBottom:bottomPad }}>
 
         {page==="matches" && (
           <div style={{ display:"flex", gap:8 }}>
@@ -627,7 +700,6 @@ export default function App() {
               </div>
               <div onClick={function(){ setActiveLeague("favorites"); }} style={{ marginBottom:5, padding:"7px 3px", borderRadius:10, cursor:"pointer", textAlign:"center", background:activeLeague==="favorites"?"rgba(232,255,71,0.1)":"rgba(255,255,255,0.04)", border:activeLeague==="favorites"?"1px solid rgba(232,255,71,0.25)":"1px solid rgba(255,255,255,0.06)" }}>
                 <div style={{ fontSize:9, fontWeight:800, color:activeLeague==="favorites"?"#e8ff47":"rgba(255,255,255,0.4)" }}>FAV</div>
-                <div style={{ fontSize:9, color:"rgba(255,255,255,0.3)" }}>{favMatches.size+favTeams.size}</div>
               </div>
               {allLeagues.map(function(l) {
                 var isActive=activeLeague===l.id, lc=l.color, isFav=favLeagues.has(l.id);
@@ -635,14 +707,13 @@ export default function App() {
                   <div key={l.id} style={{ marginBottom:5, position:"relative" }}>
                     <div onClick={function(){ setActiveLeague(l.id); }} style={{ padding:"7px 3px", borderRadius:10, cursor:"pointer", textAlign:"center", background:isActive?lc+"18":"rgba(255,255,255,0.04)", border:isActive?"1px solid "+lc+"44":"1px solid rgba(255,255,255,0.06)" }}>
                       {l.logo
-                        ? <img src={l.logo} alt="" style={{ width:22, height:22, objectFit:"contain", display:"block", margin:"0 auto" }} onError={function(e){ e.target.style.display="none"; }} />
-                        : <div style={{ width:22, height:22, background:lc, borderRadius:"50%", margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:900, color:"#000" }}>{l.name[0]}</div>
+                        ? <img src={l.logo} alt={l.name} style={{ width:24, height:24, objectFit:"contain", display:"block", margin:"0 auto" }} onError={function(e){ e.target.style.display="none"; }} />
+                        : <div style={{ width:24, height:24, background:lc, borderRadius:"50%", margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:900, color:"#000" }}>{l.name[0]}</div>
                       }
                       <div style={{ fontSize:7.5, color:isActive?lc:"rgba(255,255,255,0.35)", marginTop:3, lineHeight:1.2, overflow:"hidden", display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical" }}>{l.name}</div>
-                      <div style={{ fontSize:8, color:"rgba(255,255,255,0.2)" }}>{l.count}</div>
                       {l.liveCount>0 && <div style={{ fontSize:7, color:"#ef4444", fontWeight:800 }}>{l.liveCount} live</div>}
                     </div>
-                    <button onClick={function(e){ e.stopPropagation(); toggleFavLeague(l.id); }} title="Favourite league" style={{ position:"absolute", top:2, right:2, background:"none", border:"none", fontSize:9, cursor:"pointer", padding:0, color:isFav?"#e8ff47":"rgba(255,255,255,0.18)" }}>{isFav?"-":"-"}</button>
+                    <button onClick={function(e){ e.stopPropagation(); toggleFavLeague(l.id); }} style={{ position:"absolute", top:2, right:2, background:"none", border:"none", fontSize:9, cursor:"pointer", padding:0, color:isFav?"#e8ff47":"rgba(255,255,255,0.18)" }}>{isFav?"*":"o"}</button>
                   </div>
                 );
               })}
@@ -651,16 +722,19 @@ export default function App() {
               <input value={search} onChange={function(e){ setSearch(e.target.value); }} placeholder="Search teams..." style={{ width:"100%", padding:"8px 12px", borderRadius:9, background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", color:"#fff", fontSize:12, outline:"none", marginBottom:10, boxSizing:"border-box" }} />
               {fetchError && <div style={{ padding:"10px 12px", background:"rgba(248,113,113,0.08)", border:"1px solid rgba(248,113,113,0.2)", borderRadius:10, marginBottom:10, fontSize:11, color:"#f87171", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                 <span>{fetchError}</span>
-                <button onClick={fetchMatches} style={{ background:"none", border:"1px solid #f87171", color:"#f87171", borderRadius:5, padding:"2px 8px", cursor:"pointer", fontSize:10 }}>Retry</button>
+                <button onClick={function(){ fetchMatches(); }} style={{ background:"none", border:"1px solid #f87171", color:"#f87171", borderRadius:5, padding:"2px 8px", cursor:"pointer", fontSize:10 }}>Retry</button>
               </div>}
               {loading && <Loader />}
-              {!loading && rightMatches.length===0 && !fetchError && (
+              {!loading && matches.length===0 && !fetchError && (
+                <div style={{ textAlign:"center", padding:"40px 16px" }}>
+                  <Loader />
+                  <div style={{ fontSize:12, color:"rgba(255,255,255,0.3)", marginTop:12 }}>Loading matches... (~40s on first load)</div>
+                </div>
+              )}
+              {!loading && rightMatches.length===0 && matches.length>0 && !fetchError && (
                 <div style={{ textAlign:"center", padding:"40px 16px" }}>
                   <div style={{ fontWeight:700, color:"rgba(255,255,255,0.4)", marginBottom:6 }}>
-                    {activeLeague==="live"?"No live matches right now":activeLeague==="favorites"?"No favourited matches or teams":"No matches"}
-                  </div>
-                  <div style={{ fontSize:12, color:"rgba(255,255,255,0.2)" }}>
-                    {activeLeague==="live"?"Check back during match times":activeLeague==="favorites"?"Tap the star next to any team name or match":"No upcoming or recent matches"}
+                    {activeLeague==="live"?"No live matches right now":activeLeague==="favorites"?"No favourites yet":"No matches found"}
                   </div>
                 </div>
               )}
@@ -673,13 +747,13 @@ export default function App() {
           bets.length===0
             ? <div style={{ textAlign:"center", padding:"50px 16px", color:"rgba(255,255,255,0.35)" }}>No bets placed yet</div>
             : [...bets].reverse().map(function(b) {
-              var lc=lcol(b.leagueId);
+              var lc2=lcol(b.leagueId);
               var sc=b.status==="won"?"#4ade80":b.status==="lost"?"#f87171":b.status==="refunded"?"#60a5fa":"#fbbf24";
-              var sl=b.status==="won"?"Won":b.status==="lost"?"Lost":b.status==="refunded"?"Refunded":"Pending";
-              return <div key={b.id} style={{ background:"rgba(255,255,255,0.04)", borderLeft:"3px solid "+lc, border:"1px solid rgba(255,255,255,0.07)", borderRadius:12, padding:"13px 15px", marginBottom:9 }}>
+              var sl2=b.status==="won"?"Won":b.status==="lost"?"Lost":b.status==="refunded"?"Refunded":"Pending";
+              return <div key={b.id||b._id} style={{ background:"rgba(255,255,255,0.04)", borderLeft:"3px solid "+lc2, border:"1px solid rgba(255,255,255,0.07)", borderRadius:12, padding:"13px 15px", marginBottom:9 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                   <div style={{ flex:1 }}>
-                    <div style={{ fontSize:10, color:lc, fontWeight:700, marginBottom:3 }}>{b.league}</div>
+                    <div style={{ fontSize:10, color:lc2, fontWeight:700, marginBottom:3 }}>{b.league}</div>
                     <div style={{ fontSize:11, color:"rgba(255,255,255,0.4)", marginBottom:3 }}>{b.match_label}</div>
                     <div style={{ fontWeight:800, fontSize:14 }}>{b.option_label}</div>
                     <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", marginTop:3 }}>{b.market}</div>
@@ -691,8 +765,8 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ marginTop:9, display:"flex", gap:5 }}>
-                  <span style={{ fontSize:10, padding:"3px 10px", background:lc+"18", color:lc, borderRadius:6, fontWeight:700 }}>{b.odds}x</span>
-                  <span style={{ fontSize:10, padding:"3px 10px", background:sc+"18", color:sc, borderRadius:6, fontWeight:700 }}>{sl}</span>
+                  <span style={{ fontSize:10, padding:"3px 10px", background:lc2+"18", color:lc2, borderRadius:6, fontWeight:700 }}>{b.odds}x</span>
+                  <span style={{ fontSize:10, padding:"3px 10px", background:sc+"18", color:sc, borderRadius:6, fontWeight:700 }}>{sl2}</span>
                 </div>
               </div>;
             })
@@ -741,8 +815,6 @@ export default function App() {
                 })}
               </div>
             </div>
-
-            {/* Favourite teams */}
             {favTeams.size>0 && (
               <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:15, marginBottom:14 }}>
                 <div style={{ fontWeight:800, fontSize:13, marginBottom:10 }}>Favourite Teams</div>
@@ -750,27 +822,12 @@ export default function App() {
                   {Array.from(favTeams).map(function(t) {
                     return <div key={t} style={{ display:"flex", alignItems:"center", gap:5, padding:"5px 10px", background:"rgba(232,255,71,0.08)", border:"1px solid rgba(232,255,71,0.2)", borderRadius:20 }}>
                       <span style={{ fontSize:12, color:"#e8ff47", fontWeight:700 }}>{t}</span>
-                      <button onClick={function(){ toggleFavTeam(t); }} style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:12, padding:0, lineHeight:1 }}>x</button>
+                      <button onClick={function(){ toggleFavTeam(t); }} style={{ background:"none", border:"none", color:"rgba(255,255,255,0.4)", cursor:"pointer", fontSize:12, padding:0 }}>x</button>
                     </div>;
                   })}
                 </div>
               </div>
             )}
-
-            {/* Favourite leagues */}
-            {favLeagues.size>0 && (
-              <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:15, marginBottom:14 }}>
-                <div style={{ fontWeight:800, fontSize:13, marginBottom:10 }}>Favourite Leagues</div>
-                {allLeagues.filter(function(l){ return favLeagues.has(l.id); }).map(function(l) {
-                  return <div key={l.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8 }}>
-                    {l.logo && <img src={l.logo} alt="" style={{ width:16, height:16, objectFit:"contain" }} onError={function(e){ e.target.style.display="none"; }} />}
-                    <span style={{ fontSize:13, color:l.color, fontWeight:700, flex:1 }}>{l.name}</span>
-                    <button onClick={function(){ toggleFavLeague(l.id); }} style={{ background:"none", border:"1px solid rgba(248,113,113,0.3)", color:"#f87171", borderRadius:5, padding:"2px 8px", cursor:"pointer", fontSize:10 }}>Remove</button>
-                  </div>;
-                })}
-              </div>
-            )}
-
             <div style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:15, marginBottom:14 }}>
               <div style={{ fontWeight:800, fontSize:13, marginBottom:6 }}>P / L Summary</div>
               {[{l:"Wagered",v:fmt(totalWagered),c:"#fff"},{l:"Won",v:fmt(totalWon),c:"#4ade80"},{l:"Net P/L",v:fmt(totalWon-totalWagered),c:totalWon>=totalWagered?"#4ade80":"#f87171"}].map(function(s,i){
@@ -782,8 +839,11 @@ export default function App() {
         )}
       </div>
 
-      {selectedMatch && <MatchModal match={selectedMatch} onClose={function(){ setSelectedMatch(null); }} onBet={handleBet} balance={user.balance} favMatches={favMatches} onToggleFavMatch={toggleFavMatch} />}
-      {toast && <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#0e1628", border:"1px solid "+toast.color+"44", color:toast.color, padding:"11px 20px", borderRadius:12, fontWeight:700, fontSize:13, zIndex:300, whiteSpace:"nowrap", boxShadow:"0 8px 32px rgba(0,0,0,0.7)", animation:"toastIn 0.25s ease" }}>{toast.msg}</div>}
+      {selectedMatch && <MatchModal match={selectedMatch} onClose={function(){ setSelectedMatch(null); }} onAddToBetSlip={addToBetSlip} slip={betSlip} balance={user.balance} favMatches={favMatches} onToggleFavMatch={toggleFavMatch} />}
+
+      <BetSlip slip={betSlip} onRemove={removeFromSlip} onClear={function(){ setBetSlip([]); }} onPlaceAll={placeAllBets} balance={user.balance} />
+
+      {toast && <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#0e1628", border:"1px solid "+toast.color+"44", color:toast.color, padding:"11px 20px", borderRadius:12, fontWeight:700, fontSize:13, zIndex:400, whiteSpace:"nowrap", boxShadow:"0 8px 32px rgba(0,0,0,0.7)", animation:"toastIn 0.25s ease" }}>{toast.msg}</div>}
     </div>
   );
 }
