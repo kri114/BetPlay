@@ -46,8 +46,14 @@ async function apiFetch(path) {
       "X-RapidAPI-Host": API_HOST,
     }
   });
-  if (!res.ok) throw new Error("API " + res.status);
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error("API " + res.status + " " + txt.slice(0, 100));
+  }
   const data = await res.json();
+  // Log remaining quota
+  const remaining = res.headers.get("x-ratelimit-requests-remaining");
+  if (remaining !== null) console.log("API quota remaining:", remaining);
   return data.response || [];
 }
 
@@ -146,25 +152,32 @@ async function buildFixtures() {
     const dt = to.toISOString().split("T")[0];
 
     const all = [], seen = new Set();
-    // Fetch 2 at a time with 7s between batches to stay under 10 req/min
-    // 6 leagues = 3 batches x 7s = ~21s total (vs 36s sequential)
-    const batches = [[LEAGUES[0],LEAGUES[1]],[LEAGUES[2],LEAGUES[3]],[LEAGUES[4],LEAGUES[5]]];
-    for (let bi = 0; bi < batches.length; bi++) {
-      const batch = batches[bi];
-      const results = await Promise.all(batch.map(async league => {
-        try {
-          const fixtures = await apiFetch("/fixtures?league=" + league.id + "&season=2025&from=" + df + "&to=" + dt);
-          console.log("Fetched", league.name, "-", fixtures.length, "fixtures");
-          return fixtures;
-        } catch(e) { console.warn("Failed", league.name, e.message); return []; }
-      }));
-      results.forEach(fixtures => {
+    // Sequential with 12s delay = 5 req/min, well under RapidAPI limits
+    for (const league of LEAGUES) {
+      try {
+        const fixtures = await apiFetch("/fixtures?league=" + league.id + "&season=2025&from=" + df + "&to=" + dt);
         for (const f of fixtures) {
           const id = f.fixture && f.fixture.id;
           if (id && !seen.has(id)) { all.push(parseFixture(f)); seen.add(id); }
         }
-      });
-      if (bi < batches.length - 1) await delay(7000);
+        console.log("Fetched", league.name, "-", fixtures.length, "fixtures");
+      } catch(e) {
+        console.warn("Failed", league.name, e.message);
+        if (e.message.includes("429")) {
+          console.log("Rate limited - waiting 30s before continuing...");
+          await delay(30000);
+          // Retry once
+          try {
+            const fixtures = await apiFetch("/fixtures?league=" + league.id + "&season=2025&from=" + df + "&to=" + dt);
+            for (const f of fixtures) {
+              const id = f.fixture && f.fixture.id;
+              if (id && !seen.has(id)) { all.push(parseFixture(f)); seen.add(id); }
+            }
+            console.log("Retry OK", league.name, fixtures.length, "fixtures");
+          } catch(e2) { console.warn("Retry failed", league.name, e2.message); }
+        }
+      }
+      await delay(12000); // 12s between requests = 5/min
     }
 
     all.sort((a, b) => {
@@ -186,9 +199,12 @@ setTimeout(buildFixtures, 500);
 setInterval(function() {
   const hasLive = (_fixturesCache || []).some(m => m.status === "live");
   const age = Date.now() - _fixturesCacheTs;
-  const ttl = hasLive ? 30000 : 5 * 60 * 1000;
+  // Free tier: 100 req/day. 6 leagues = 6 req per refresh.
+  // Live: refresh every 5 min (288 req/day max - too much, use 15min = 48 req)
+  // No live: refresh every 2 hours
+  const ttl = hasLive ? 15 * 60 * 1000 : 2 * 60 * 60 * 1000;
   if (age > ttl) buildFixtures();
-}, 30000);
+}, 60000);
 
 // ── Bet settlement ────────────────────────────────────────────────────────────
 async function settleBets() {
