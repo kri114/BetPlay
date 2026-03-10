@@ -140,23 +140,31 @@ async function buildFixtures() {
   if (_fixturesRefreshing) return;
   _fixturesRefreshing = true;
   try {
-    const today = new Date().toISOString().split("T")[0];
     const from  = new Date(); from.setDate(from.getDate() - 2);
     const to    = new Date(); to.setDate(to.getDate() + 7);
     const df = from.toISOString().split("T")[0];
     const dt = to.toISOString().split("T")[0];
 
     const all = [], seen = new Set();
-    for (const league of LEAGUES) {
-      try {
-        const fixtures = await apiFetch("/fixtures?league=" + league.id + "&season=2025&from=" + df + "&to=" + dt);
+    // Fetch 2 at a time with 7s between batches to stay under 10 req/min
+    // 6 leagues = 3 batches x 7s = ~21s total (vs 36s sequential)
+    const batches = [[LEAGUES[0],LEAGUES[1]],[LEAGUES[2],LEAGUES[3]],[LEAGUES[4],LEAGUES[5]]];
+    for (let bi = 0; bi < batches.length; bi++) {
+      const batch = batches[bi];
+      const results = await Promise.all(batch.map(async league => {
+        try {
+          const fixtures = await apiFetch("/fixtures?league=" + league.id + "&season=2025&from=" + df + "&to=" + dt);
+          console.log("Fetched", league.name, "-", fixtures.length, "fixtures");
+          return fixtures;
+        } catch(e) { console.warn("Failed", league.name, e.message); return []; }
+      }));
+      results.forEach(fixtures => {
         for (const f of fixtures) {
           const id = f.fixture && f.fixture.id;
           if (id && !seen.has(id)) { all.push(parseFixture(f)); seen.add(id); }
         }
-        console.log("Fetched", league.name, "-", fixtures.length, "fixtures");
-      } catch(e) { console.warn("Failed", league.name, e.message); }
-      await delay(6200);
+      });
+      if (bi < batches.length - 1) await delay(7000);
     }
 
     all.sort((a, b) => {
