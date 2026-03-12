@@ -5,7 +5,7 @@ async function api(path, opts) {
   opts = opts || {};
   const token = getToken();
   const res = await fetch("/api" + path, Object.assign({}, opts, {
-    headers: Object.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}, opts.headers || {}),
+    headers: ObjectA.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}, opts.headers || {}),
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   }));
   const data = await res.json();
