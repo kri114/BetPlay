@@ -701,6 +701,7 @@ export default function App() {
           {adCooldown>0?"Next +$10 in "+adCooldown+"s":"Watch Ad - Get $10 FREE"}
         </button>
         <div style={{ display:"flex", gap:3, marginTop:9, background:"rgba(255,255,255,0.04)", borderRadius:11, padding:3 }}>
+          <TabBtn id="today"   label="Today" />
           <TabBtn id="matches" label="Matches" />
           <TabBtn id="mybets"  label={"Bets"+(pendingBets.length>0?" ("+pendingBets.length+")":"")} />
           <TabBtn id="board"   label="Ranks" />
@@ -709,6 +710,87 @@ export default function App() {
       </div>
 
       <div style={{ padding:"12px 12px", paddingBottom:bottomPad }}>
+
+        {page==="today" && (
+          (function(){
+            var now = new Date();
+            var todayStr = now.toDateString();
+            var todayMatches = (fixtures||[]).filter(function(m){
+              var d = new Date(m.kickoffTs);
+              return d.toDateString() === todayStr;
+            });
+            var byLeague = {};
+            todayMatches.forEach(function(m){
+              if (!byLeague[m.league]) byLeague[m.league] = { color: m.leagueColor, matches: [] };
+              byLeague[m.league].matches.push(m);
+            });
+            var leagueKeys = Object.keys(byLeague);
+            return (
+              <div>
+                <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", letterSpacing:1, marginBottom:14, fontWeight:700 }}>
+                  TODAY — {now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}).toUpperCase()}
+                </div>
+                {loading && <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(255,255,255,0.3)" }}>Loading...</div>}
+                {!loading && todayMatches.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"50px 16px", color:"rgba(255,255,255,0.3)" }}>
+                    <div style={{ fontSize:32, marginBottom:10 }}>📅</div>
+                    <div>No matches scheduled for today</div>
+                  </div>
+                )}
+                {!loading && leagueKeys.map(function(leagueName){
+                  var lg = byLeague[leagueName];
+                  var lc2 = lg.color;
+                  return (
+                    <div key={leagueName} style={{ marginBottom:18 }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:7, marginBottom:8, paddingBottom:6, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+                        <div style={{ width:3, height:14, borderRadius:2, background:lc2 }} />
+                        <div style={{ fontSize:11, fontWeight:800, color:lc2, letterSpacing:0.5 }}>{leagueName.toUpperCase()}</div>
+                        <div style={{ fontSize:10, color:"rgba(255,255,255,0.25)", marginLeft:"auto" }}>{lg.matches.length} match{lg.matches.length!==1?"es":""}</div>
+                      </div>
+                      {lg.matches.map(function(m){
+                        var isLive = m.status==="live";
+                        var isDone = m.status==="finished";
+                        var kickoffTime = new Date(m.kickoffTs).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+                        return (
+                          <div key={m.id} onClick={function(){ setModalMatch(m); setModalTab("markets"); }}
+                            style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.07)", borderRadius:12, padding:"12px 14px", marginBottom:7, cursor:"pointer", position:"relative", overflow:"hidden" }}>
+                            {isLive && <div style={{ position:"absolute", top:0, left:0, right:0, height:2, background:"linear-gradient(90deg,#ef4444,#f97316)" }} />}
+                            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+                              <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+                                {isLive && <span style={{ fontSize:9, fontWeight:900, color:"#ef4444", background:"rgba(239,68,68,0.12)", padding:"2px 6px", borderRadius:4, letterSpacing:1 }}>LIVE {m.elapsed ? m.elapsed+"'" : ""}</span>}
+                                {isDone && <span style={{ fontSize:9, fontWeight:700, color:"rgba(255,255,255,0.3)", background:"rgba(255,255,255,0.06)", padding:"2px 6px", borderRadius:4 }}>FT</span>}
+                                {!isLive && !isDone && <span style={{ fontSize:11, color:"#e8ff47", fontWeight:700 }}>{kickoffTime}</span>}
+                              </div>
+                              <div style={{ display:"flex", gap:5 }}>
+                                <span style={{ fontSize:10, color:"rgba(255,255,255,0.4)", background:"rgba(255,255,255,0.05)", padding:"2px 8px", borderRadius:5 }}>{m.homeOdds}</span>
+                                <span style={{ fontSize:10, color:"rgba(255,255,255,0.4)", background:"rgba(255,255,255,0.05)", padding:"2px 8px", borderRadius:5 }}>{m.drawOdds}</span>
+                                <span style={{ fontSize:10, color:"rgba(255,255,255,0.4)", background:"rgba(255,255,255,0.05)", padding:"2px 8px", borderRadius:5 }}>{m.awayOdds}</span>
+                              </div>
+                            </div>
+                            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                              <div style={{ flex:1, display:"flex", alignItems:"center", gap:7 }}>
+                                {m.homeLogo && <img src={m.homeLogo} style={{ width:20, height:20, objectFit:"contain" }} alt="" />}
+                                <span style={{ fontWeight:700, fontSize:13 }}>{m.home}</span>
+                              </div>
+                              {(isLive||isDone) && m.homeScore!=null
+                                ? <div style={{ fontWeight:900, fontSize:16, minWidth:40, textAlign:"center", color:isLive?"#ef4444":"#fff" }}>{m.homeScore} - {m.awayScore}</div>
+                                : <div style={{ fontSize:11, color:"rgba(255,255,255,0.2)", minWidth:40, textAlign:"center" }}>vs</div>
+                              }
+                              <div style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"flex-end", gap:7 }}>
+                                <span style={{ fontWeight:700, fontSize:13 }}>{m.away}</span>
+                                {m.awayLogo && <img src={m.awayLogo} style={{ width:20, height:20, objectFit:"contain" }} alt="" />}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()
+        )}
 
         {page==="matches" && (
           <div style={{ display:"flex", gap:8 }}>
