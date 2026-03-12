@@ -5,7 +5,7 @@ async function api(path, opts) {
   opts = opts || {};
   const token = getToken();
   const res = await fetch("/api" + path, Object.assign({}, opts, {
-    headers: ObjectA.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}, opts.headers || {}),
+    headers: Object.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}, opts.headers || {}),
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   }));
   const data = await res.json();
@@ -579,9 +579,15 @@ export default function App() {
     }).catch(function(e){ showToast(e.message, "#f87171"); });
   }, []);
 
+  var [showAdModal,setShowAdModal] = useState(false);
   var watchAd = function() {
     if (adCooldown>0) return;
+    setShowAdModal(true);
+  };
+  var closeAd = function() {
+    setShowAdModal(false);
     setAdCooldown(30);
+    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch(e) {}
     api("/adreward", { method:"POST" })
       .then(function(d){ setUser(function(u){ return Object.assign({},u,{balance:d.balance}); }); showToast("+$10 added!", "#4ade80"); })
       .catch(function(e){ showToast(e.message, "#f87171"); });
@@ -589,7 +595,28 @@ export default function App() {
 
   var logout = function(){ localStorage.removeItem("bp_token"); setUser(null); setMatches([]); setBetSlip([]); };
 
+  var AdModal = showAdModal ? (
+    <div style={{ position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(0,0,0,0.85)", zIndex:9999, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:20 }}>
+      <div style={{ background:"#0c1428", border:"1px solid rgba(255,255,255,0.1)", borderRadius:20, padding:24, width:"100%", maxWidth:400, textAlign:"center" }}>
+        <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", letterSpacing:2, marginBottom:12 }}>ADVERTISEMENT</div>
+        <ins className="adsbygoogle"
+          style={{ display:"block", minHeight:250 }}
+          data-ad-client="ca-pub-4960847713738346"
+          data-ad-slot="auto"
+          data-ad-format="auto"
+          data-full-width-responsive="true" />
+        <div style={{ marginTop:16 }}>
+          <button onClick={closeAd} style={{ padding:"12px 32px", background:"#e8ff47", color:"#060d1a", border:"none", borderRadius:10, fontWeight:900, fontSize:14, cursor:"pointer" }}>
+            Claim +$10 ✓
+          </button>
+        </div>
+        <div style={{ fontSize:10, color:"rgba(255,255,255,0.2)", marginTop:8 }}>Watch the ad to earn your reward</div>
+      </div>
+    </div>
+  ) : null;
+
   if (!user) return <AuthScreen onLogin={function(u){ setUser(u); }} />;
+  // AdModal rendered in main return
 
   var bets         = user.bets||[];
   var liveMatches  = matches.filter(function(m){ return m.status==="live"; });
@@ -700,7 +727,8 @@ export default function App() {
         <button onClick={watchAd} disabled={adCooldown>0} style={{ width:"100%", marginTop:9, padding:"8px", background:adCooldown>0?"transparent":"rgba(74,222,128,0.08)", border:adCooldown>0?"1px solid rgba(255,255,255,0.05)":"1px solid rgba(74,222,128,0.2)", borderRadius:9, color:adCooldown>0?"rgba(255,255,255,0.18)":"#4ade80", cursor:adCooldown>0?"not-allowed":"pointer", fontWeight:700, fontSize:12 }}>
           {adCooldown>0?"Next +$10 in "+adCooldown+"s":"Watch Ad - Get $10 FREE"}
         </button>
-        <div style={{ display:"flex", gap:3, marginTop:9, background:"rgba(255,255,255,0.04)", borderRadius:11, padding:3 }}>
+        {AdModal}
+      <div style={{ display:"flex", gap:3, marginTop:9, background:"rgba(255,255,255,0.04)", borderRadius:11, padding:3 }}>
           <TabBtn id="today"   label="Today" />
           <TabBtn id="matches" label="Matches" />
           <TabBtn id="mybets"  label={"Bets"+(pendingBets.length>0?" ("+pendingBets.length+")":"")} />
@@ -715,10 +743,20 @@ export default function App() {
           (function(){
             var now = new Date();
             var todayStr = now.toDateString();
-            var todayMatches = (fixtures||[]).filter(function(m){
+            var todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+            var todayEnd   = new Date(now); todayEnd.setHours(23,59,59,999);
+            var todayMatches = (matches||[]).filter(function(m){
               var d = new Date(m.kickoffTs);
-              return d.toDateString() === todayStr;
+              return d >= todayStart && d <= todayEnd;
             });
+            // fallback: if nothing found, show next 24h
+            if (todayMatches.length === 0) {
+              var in24 = new Date(now.getTime() + 24*60*60*1000);
+              todayMatches = (matches||[]).filter(function(m){
+                var d = new Date(m.kickoffTs);
+                return d >= now && d <= in24;
+              });
+            }
             var byLeague = {};
             todayMatches.forEach(function(m){
               if (!byLeague[m.league]) byLeague[m.league] = { color: m.leagueColor, matches: [] };
@@ -730,11 +768,15 @@ export default function App() {
                 <div style={{ fontSize:11, color:"rgba(255,255,255,0.3)", letterSpacing:1, marginBottom:14, fontWeight:700 }}>
                   TODAY — {now.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}).toUpperCase()}
                 </div>
-                {loading && <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(255,255,255,0.3)" }}>Loading...</div>}
-                {!loading && todayMatches.length === 0 && (
+                {loading && <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(255,255,255,0.3)" }}>Loading matches...</div>}
+                {!loading && matches && matches.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"40px 0", color:"rgba(255,255,255,0.3)" }}>No fixtures loaded yet — try refreshing</div>
+                )}
+                {!loading && matches && matches.length > 0 && todayMatches.length === 0 && (
                   <div style={{ textAlign:"center", padding:"50px 16px", color:"rgba(255,255,255,0.3)" }}>
                     <div style={{ fontSize:32, marginBottom:10 }}>📅</div>
-                    <div>No matches scheduled for today</div>
+                    <div style={{ marginBottom:6 }}>No matches today</div>
+                    <div style={{ fontSize:10, opacity:0.5 }}>Showing next available: {(matches||[]).filter(function(m){ return m.status==="upcoming"; }).slice(0,3).map(function(m){ return m.home+" vs "+m.away; }).join(", ") || "none"}</div>
                   </div>
                 )}
                 {!loading && leagueKeys.map(function(leagueName){
