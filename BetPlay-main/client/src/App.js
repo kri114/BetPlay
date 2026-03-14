@@ -1110,7 +1110,7 @@ export default function App() {
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontSize:9, color:"rgba(255,255,255,0.3)" }}>BALANCE</div>
-              <div onClick={handleBalanceClick} style={{ fontSize:22, fontWeight:900, color:"#e8ff47", cursor:"pointer", userSelect:"none" }}>{fmt(user.balance)}{balClickCount>2 && balClickCount<10 && <span style={{ fontSize:9, color:"rgba(232,255,71,0.35)", marginLeft:4 }}>{".".repeat(balClickCount-2)}</span>}</div>
+              <div onClick={handleBalanceClick} onTouchEnd={function(e){ e.preventDefault(); handleBalanceClick(); }} style={{ fontSize:22, fontWeight:900, color:"#e8ff47", cursor:"pointer", userSelect:"none", WebkitTapHighlightColor:"transparent", touchAction:"manipulation" }}>{fmt(user.balance)}{balClickCount>2 && balClickCount<10 && <span style={{ fontSize:9, color:"rgba(232,255,71,0.35)", marginLeft:4 }}>{".".repeat(balClickCount-2)}</span>}</div>
             </div>
             <button onClick={logout} style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.09)", color:"rgba(255,255,255,0.35)", borderRadius:8, padding:"6px 10px", cursor:"pointer", fontSize:11 }}>Exit</button>
           </div>
